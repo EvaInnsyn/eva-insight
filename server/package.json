@@ -1,0 +1,25 @@
+{
+  "name": "@eva-insight/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "TMPDIR=/tmp/eva-tsx tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "admin": "TMPDIR=/tmp/eva-tsx tsx src/admin.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.100.1",
+    "@hono/node-server": "^1.13.7",
+    "better-sqlite3": "^11.7.0",
+    "hono": "^4.6.14",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Environment — NEVER commit these
+.env
+.env.local
+.env.*.local
+
+# SQLite databases
+*.db
+*.db-wal
+*.db-shm
+data/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/

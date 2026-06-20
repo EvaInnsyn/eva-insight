@@ -1,0 +1,912 @@
+/*
+ * Eva Insight side panel — light palette.
+ *
+ *   #fde6e6  background (page + frame interiors)
+ *   #be3519  text + frame borders + accents
+ *
+ * Typography
+ *   League Spartan (700)  → "Eva Insight" wordmark only
+ *   Poppins (400/500/600) → everything else
+ *
+ * Fonts are bundled (woff2 in public/fonts/) — no remote requests.
+ */
+
+@font-face {
+  font-family: "League Spartan";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/LeagueSpartan.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Poppins";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/Poppins-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Poppins";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/Poppins-500.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Poppins";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/Poppins-600.woff2") format("woff2");
+}
+
+:root {
+  --eva-bg: #fde6e6;
+  --eva-bg-dim: #f7d7d7;
+  --eva-frame: #be3519;
+  --eva-frame-dim: rgba(190, 53, 25, 0.35);
+  --eva-text: #be3519;
+  --eva-text-dim: #c66b5c;
+  --eva-text-faint: #d99c8e;
+  --eva-text-on-red: #fde6e6;
+
+  --eva-danger: #be3519;
+
+  --eva-font-wordmark:
+    "League Spartan", "Inter Tight", Helvetica, Arial, sans-serif;
+  --eva-font-body:
+    "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--eva-bg);
+  color: var(--eva-text);
+  font-family: var(--eva-font-body);
+  font-weight: 400;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input,
+textarea {
+  font-family: inherit;
+}
+
+/* ---------- Shell ---------- */
+
+.eva-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--eva-bg);
+}
+
+.eva-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--eva-frame);
+  background: var(--eva-bg);
+  flex: 0 0 auto;
+}
+
+.eva-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--eva-font-wordmark);
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: 0.6px;
+  color: var(--eva-text);
+  text-transform: uppercase;
+}
+
+.eva-logo-img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
+.eva-logo-name {
+  /* League Spartan benefits from a tiny optical lift */
+  position: relative;
+  top: 1px;
+}
+
+.eva-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.eva-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--eva-text);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+.eva-iconbtn:hover {
+  background: var(--eva-bg-dim);
+  border-color: var(--eva-frame);
+}
+
+.eva-iconbtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.eva-iconbtn-text {
+  width: auto;
+  padding: 0 10px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-weight: 600;
+  font-family: var(--eva-font-body);
+}
+
+/* ---------- Banner ---------- */
+
+.eva-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--eva-bg);
+  color: var(--eva-text);
+  border-bottom: 1px solid var(--eva-frame);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.eva-link {
+  background: none;
+  border: none;
+  color: var(--eva-text);
+  cursor: pointer;
+  text-decoration: underline;
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+}
+
+/* ---------- Main / list ---------- */
+
+.eva-main {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.eva-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 18px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--eva-frame-dim) transparent;
+}
+
+.eva-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.eva-list::-webkit-scrollbar-thumb {
+  background: var(--eva-frame-dim);
+  border-radius: 4px;
+}
+
+.eva-empty {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+  gap: 14px;
+}
+
+.eva-empty-eye {
+  width: 96px;
+  height: 96px;
+}
+
+.eva-empty-headline {
+  font-family: var(--eva-font-wordmark);
+  font-weight: 700;
+  font-size: 22px;
+  color: var(--eva-text);
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.eva-empty-sub {
+  color: var(--eva-text-dim);
+  font-size: 13px;
+  max-width: 240px;
+  line-height: 1.55;
+  font-weight: 400;
+}
+
+/* ---------- Message bubbles ---------- */
+
+.eva-msg {
+  display: flex;
+  width: 100%;
+}
+
+.eva-msg-user {
+  justify-content: flex-end;
+}
+
+.eva-msg-assistant {
+  justify-content: flex-start;
+}
+
+.eva-msg-bubble {
+  max-width: 92%;
+  padding: 10px 13px;
+  border-radius: 14px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-size: 14px;
+  line-height: 1.55;
+  border: 1px solid var(--eva-frame);
+  background: var(--eva-bg);
+  color: var(--eva-text);
+}
+
+.eva-msg-user .eva-msg-bubble {
+  background: var(--eva-frame);
+  color: var(--eva-text-on-red);
+  border-color: var(--eva-frame);
+  border-bottom-right-radius: 6px;
+  font-weight: 500;
+}
+
+.eva-msg-assistant .eva-msg-bubble {
+  border-bottom-left-radius: 6px;
+}
+
+.eva-msg-error {
+  margin-top: 6px;
+  padding: 10px 12px;
+  background: var(--eva-frame);
+  border: 1px solid var(--eva-frame);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--eva-text-on-red);
+  white-space: normal;
+  font-weight: 400;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.eva-msg-error-title {
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.2px;
+}
+
+.eva-msg-error-body {
+  line-height: 1.5;
+}
+
+.eva-msg-error-action {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 5px 10px;
+  background: var(--eva-text-on-red);
+  color: var(--eva-frame);
+  border-radius: 6px;
+  font-weight: 600;
+  text-decoration: none;
+  font-size: 11px;
+  align-self: flex-start;
+  letter-spacing: 0.3px;
+}
+
+.eva-msg-error-action:hover {
+  filter: brightness(0.95);
+}
+
+.eva-msg-text {
+  white-space: pre-wrap;
+}
+
+/* ---------- Tool call cards ---------- */
+
+.eva-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.eva-tool {
+  border: 1px solid var(--eva-frame);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--eva-bg);
+}
+
+.eva-tool-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  background: var(--eva-bg-dim);
+  border: none;
+  cursor: pointer;
+  color: var(--eva-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+}
+
+.eva-tool-header:hover {
+  background: var(--eva-bg);
+}
+
+.eva-tool-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.eva-tool-status-running {
+  background: var(--eva-frame);
+  animation: eva-tool-pulse 1.4s ease-in-out infinite;
+}
+
+.eva-tool-status-done {
+  background: var(--eva-frame);
+}
+
+.eva-tool-status-error {
+  background: var(--eva-frame);
+  box-shadow: 0 0 0 1px var(--eva-frame);
+}
+
+@keyframes eva-tool-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+.eva-tool-name {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+
+.eva-tool-summary {
+  flex: 1 1 auto;
+  color: var(--eva-text-dim);
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.eva-tool-caret {
+  flex: 0 0 auto;
+  color: var(--eva-text-dim);
+  font-size: 11px;
+}
+
+.eva-tool-body {
+  padding: 8px 10px 10px;
+  border-top: 1px dashed var(--eva-frame-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.eva-tool-section-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--eva-text-dim);
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+
+.eva-tool-code {
+  margin: 0;
+  padding: 6px 8px;
+  background: var(--eva-bg-dim);
+  border: 1px solid var(--eva-frame-dim);
+  border-radius: 6px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 280px;
+  overflow: auto;
+  color: var(--eva-text);
+}
+
+.eva-msg-user .eva-tool {
+  /* User-bubble side never shows tool calls but if it ever does, invert */
+  background: var(--eva-bg);
+  color: var(--eva-text);
+}
+
+/* ---------- Confirmation dialog ---------- */
+
+.eva-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(190, 53, 25, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  z-index: 100;
+  backdrop-filter: blur(2px);
+}
+
+.eva-confirm {
+  background: var(--eva-bg);
+  border: 1px solid var(--eva-frame);
+  border-radius: 12px;
+  padding: 16px;
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 10px 30px rgba(190, 53, 25, 0.25);
+}
+
+.eva-confirm-eyebrow {
+  font-family: var(--eva-font-wordmark);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--eva-text);
+}
+
+.eva-confirm-body {
+  color: var(--eva-text);
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.eva-confirm-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--eva-text);
+  cursor: pointer;
+}
+
+.eva-confirm-remember input {
+  accent-color: var(--eva-frame);
+}
+
+.eva-confirm-remember code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  background: var(--eva-bg-dim);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.eva-confirm-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.eva-btn-ghost {
+  background: transparent;
+  color: var(--eva-text);
+  border: 1px solid var(--eva-frame);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-weight: 500;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+}
+
+.eva-btn-ghost:hover {
+  background: var(--eva-bg-dim);
+}
+
+/* ---------- Always-allow chips in settings ---------- */
+
+.eva-allowed {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.eva-allowed-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 10px;
+  background: var(--eva-bg-dim);
+  border: 1px solid var(--eva-frame);
+  border-radius: 999px;
+  font-size: 11px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--eva-text);
+}
+
+.eva-allowed-chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  color: var(--eva-text);
+  cursor: pointer;
+  border-radius: 50%;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+}
+
+.eva-allowed-chip button:hover {
+  background: var(--eva-frame);
+  color: var(--eva-text-on-red);
+}
+
+/* ---------- Usage bar in Settings ---------- */
+
+.eva-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--eva-bg-dim);
+  border: 1px solid var(--eva-frame);
+  border-radius: 8px;
+}
+
+.eva-usage-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--eva-text);
+  font-weight: 600;
+}
+
+.eva-usage-error {
+  font-size: 11px;
+  color: var(--eva-text);
+  opacity: 0.75;
+}
+
+.eva-usage-dev {
+  font-size: 12px;
+  color: var(--eva-text);
+  font-style: italic;
+}
+
+.eva-usage-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.eva-usage-bar {
+  flex: 1 1 auto;
+  height: 8px;
+  background: var(--eva-bg);
+  border: 1px solid var(--eva-frame-dim);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.eva-usage-bar-fill {
+  height: 100%;
+  background: var(--eva-frame);
+  transition: width 240ms ease;
+}
+
+.eva-usage-bar-fill-warn {
+  background: linear-gradient(90deg, var(--eva-frame) 0%, #d97757 100%);
+}
+
+.eva-usage-pct {
+  font-size: 11px;
+  color: var(--eva-text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 32px;
+  text-align: right;
+}
+
+.eva-usage-detail {
+  font-size: 11px;
+  color: var(--eva-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.eva-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--eva-text);
+  animation: eva-blink 1s steps(1) infinite;
+}
+
+.eva-msg-user .eva-cursor {
+  background: var(--eva-text-on-red);
+}
+
+@keyframes eva-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.eva-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.eva-typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--eva-text);
+  animation: eva-pulse 1.2s ease-in-out infinite;
+}
+
+.eva-typing span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.eva-typing span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes eva-pulse {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.85);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ---------- Composer ---------- */
+
+.eva-composer {
+  flex: 0 0 auto;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--eva-frame);
+  background: var(--eva-bg);
+}
+
+.eva-composer-disabled-note {
+  font-size: 11px;
+  color: var(--eva-text-dim);
+  margin-bottom: 6px;
+}
+
+.eva-composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.eva-input {
+  flex: 1 1 auto;
+  resize: none;
+  background: var(--eva-bg);
+  color: var(--eva-text);
+  border: 1px solid var(--eva-frame);
+  border-radius: 10px;
+  padding: 9px 11px;
+  font: inherit;
+  line-height: 1.4;
+  outline: none;
+  transition: box-shadow 120ms ease;
+  max-height: 160px;
+}
+
+.eva-input::placeholder {
+  color: var(--eva-text-faint);
+}
+
+.eva-input:focus {
+  box-shadow: 0 0 0 2px rgba(190, 53, 25, 0.18);
+}
+
+.eva-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.eva-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--eva-frame);
+  border-radius: 10px;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    transform 80ms ease;
+}
+
+.eva-btn-send {
+  background: var(--eva-frame);
+  color: var(--eva-text-on-red);
+}
+
+.eva-btn-send:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.eva-btn-send:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.eva-btn-send:disabled {
+  background: var(--eva-bg);
+  color: var(--eva-text-faint);
+  border-color: var(--eva-text-faint);
+  cursor: not-allowed;
+}
+
+.eva-btn-stop {
+  background: var(--eva-frame);
+  color: var(--eva-text-on-red);
+}
+
+/* ---------- Settings panel ---------- */
+
+.eva-settings {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--eva-frame);
+  background: var(--eva-bg);
+}
+
+.eva-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  font-family: var(--eva-font-wordmark);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--eva-text);
+  border-bottom: 1px solid var(--eva-frame);
+}
+
+.eva-settings-body {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.eva-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.eva-field-label {
+  font-size: 11px;
+  color: var(--eva-text);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  font-weight: 600;
+}
+
+.eva-text {
+  background: var(--eva-bg);
+  color: var(--eva-text);
+  border: 1px solid var(--eva-frame);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  outline: none;
+  transition: box-shadow 120ms ease;
+}
+
+.eva-text::placeholder {
+  color: var(--eva-text-faint);
+}
+
+.eva-text:focus {
+  box-shadow: 0 0 0 2px rgba(190, 53, 25, 0.18);
+}
+
+.eva-settings-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+.eva-settings-saved {
+  font-size: 12px;
+  color: var(--eva-text);
+  font-weight: 600;
+}
+
+.eva-btn-primary {
+  background: var(--eva-frame);
+  color: var(--eva-text-on-red);
+  border: 1px solid var(--eva-frame);
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
+.eva-btn-primary:hover {
+  filter: brightness(1.08);
+}

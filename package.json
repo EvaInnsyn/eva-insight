@@ -1,0 +1,19 @@
+{
+  "name": "eva-insight",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Eva Insight — AI side panel for Chrome (sister product to Eva Platform)",
+  "workspaces": [
+    "extension",
+    "server"
+  ],
+  "scripts": {
+    "dev:extension": "npm run dev --workspace=extension",
+    "dev:server": "npm run dev --workspace=server",
+    "build:extension": "npm run build --workspace=extension",
+    "build": "npm run build --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
