@@ -14,7 +14,7 @@ export interface EvaSettings {
 const KEY = "eva-insight/settings";
 
 const DEFAULTS: EvaSettings = {
-  proxyUrl: "http://localhost:8787",
+  proxyUrl: "https://eva-insightserver-production.up.railway.app",
   sharedSecret: "",
   allowedDomains: [],
 };
