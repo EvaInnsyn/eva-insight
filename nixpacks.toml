@@ -1,0 +1,3 @@
+# Adds Python so better-sqlite3 can compile its native module via node-gyp
+[phases.setup]
+nixPkgs = ["python3", "python3Packages.pip"]
