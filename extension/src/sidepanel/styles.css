@@ -347,7 +347,74 @@ textarea {
 }
 
 .eva-msg-text {
-  white-space: pre-wrap;
+  white-space: normal;
+}
+
+/* Markdown rendered inside assistant bubbles */
+.eva-msg-text p {
+  margin: 0 0 0.5em;
+}
+.eva-msg-text p:last-child {
+  margin-bottom: 0;
+}
+.eva-msg-text strong {
+  font-weight: 600;
+}
+.eva-msg-text em {
+  font-style: italic;
+}
+.eva-msg-text h1,
+.eva-msg-text h2,
+.eva-msg-text h3 {
+  font-family: var(--eva-font-wordmark);
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  margin: 0.8em 0 0.3em;
+  font-size: 13px;
+  color: var(--eva-text);
+}
+.eva-msg-text h1:first-child,
+.eva-msg-text h2:first-child,
+.eva-msg-text h3:first-child {
+  margin-top: 0;
+}
+.eva-msg-text ul,
+.eva-msg-text ol {
+  margin: 0.3em 0 0.5em;
+  padding-left: 1.3em;
+}
+.eva-msg-text li {
+  margin-bottom: 0.2em;
+}
+.eva-msg-text code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  background: var(--eva-bg-dim);
+  border: 1px solid var(--eva-frame-dim);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.eva-msg-text pre {
+  background: var(--eva-bg-dim);
+  border: 1px solid var(--eva-frame-dim);
+  border-radius: 6px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  margin: 0.4em 0;
+}
+.eva-msg-text pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+}
+/* User bubble — invert markdown colours */
+.eva-msg-user .eva-msg-text strong { color: var(--eva-text-on-red); }
+.eva-msg-user .eva-msg-text code {
+  background: rgba(253,230,230,0.2);
+  border-color: rgba(253,230,230,0.35);
+  color: var(--eva-text-on-red);
 }
 
 /* ---------- Tool call cards ---------- */

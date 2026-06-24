@@ -1,3 +1,4 @@
+import ReactMarkdown from "react-markdown";
 import type { ChatMessage } from "@/shared/chat";
 import { ToolCall } from "./ToolCall";
 import { ThinkingEye } from "./ThinkingEye";
@@ -26,7 +27,7 @@ export function Message({ message }: { message: ChatMessage }) {
         ) : null}
         {hasText ? (
           <div className="eva-msg-text">
-            {message.text}
+            <ReactMarkdown>{message.text}</ReactMarkdown>
             {message.streaming ? (
               <span className="eva-cursor" aria-hidden />
             ) : null}
