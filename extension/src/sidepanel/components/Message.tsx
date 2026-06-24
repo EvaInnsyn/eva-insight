@@ -1,5 +1,6 @@
 import type { ChatMessage } from "@/shared/chat";
 import { ToolCall } from "./ToolCall";
+import { ThinkingEye } from "./ThinkingEye";
 
 export function Message({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
@@ -19,6 +20,8 @@ export function Message({ message }: { message: ChatMessage }) {
             {calls.map((c) => (
               <ToolCall key={c.id} call={c} />
             ))}
+            {/* Eye shows while still streaming after tool calls */}
+            {message.streaming ? <ThinkingEye /> : null}
           </div>
         ) : null}
         {hasText ? (
@@ -29,19 +32,11 @@ export function Message({ message }: { message: ChatMessage }) {
             ) : null}
           </div>
         ) : message.streaming && !hasCalls ? (
-          <TypingDots />
+          <ThinkingEye />
         ) : null}
         {message.error ? <ErrorBlock raw={message.error} /> : null}
       </div>
     </div>
-  );
-}
-
-function TypingDots() {
-  return (
-    <span className="eva-typing" aria-label="thinking">
-      <span /> <span /> <span />
-    </span>
   );
 }
 

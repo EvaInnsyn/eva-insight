@@ -695,38 +695,47 @@ textarea {
   }
 }
 
-.eva-typing {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+/* ---------- Thinking eye ---------- */
+
+.eva-thinking-eye {
+  display: inline-block;
+  margin: 4px 0 2px;
 }
 
-.eva-typing span {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--eva-text);
-  animation: eva-pulse 1.2s ease-in-out infinite;
+/* Whole eye blinks slowly */
+.eva-eye-svg {
+  display: block;
+  animation: eva-eye-blink 4s ease-in-out infinite;
+  transform-origin: 24px 15px;
 }
 
-.eva-typing span:nth-child(2) {
-  animation-delay: 0.15s;
-}
-
-.eva-typing span:nth-child(3) {
-  animation-delay: 0.3s;
-}
-
-@keyframes eva-pulse {
+@keyframes eva-eye-blink {
   0%,
-  60%,
+  82%,
   100% {
-    opacity: 0.25;
-    transform: scale(0.85);
+    transform: scaleY(1);
   }
-  30% {
-    opacity: 1;
-    transform: scale(1);
+  88% {
+    transform: scaleY(0.06);
+  }
+  94% {
+    transform: scaleY(1);
+  }
+}
+
+/* Pupil orbits around the iris centre */
+.eva-eye-pupil {
+  transform-box: fill-box;
+  transform-origin: center center;
+  animation: eva-eye-orbit 2.2s linear infinite;
+}
+
+@keyframes eva-eye-orbit {
+  from {
+    transform: rotate(0deg) translateY(-5px) rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg) translateY(-5px) rotate(-360deg);
   }
 }
 

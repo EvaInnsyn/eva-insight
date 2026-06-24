@@ -84,7 +84,7 @@ export async function runChat(args: RunChatArgs): Promise<RunChatResult> {
       system,
       messages,
       tools,
-      max_tokens: 4096,
+      max_tokens: 8192,
     }),
     signal,
   });

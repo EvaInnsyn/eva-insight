@@ -31,6 +31,7 @@ export default defineManifest({
     "activeTab",
     "scripting",
     "storage",
+    "alarms",
     "webNavigation",
     "debugger",
   ],

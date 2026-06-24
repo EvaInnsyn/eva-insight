@@ -23,7 +23,7 @@ import {
 } from "../shared/tools";
 import { getActiveTab } from "./page-bridge";
 
-const MAX_TOOL_ROUNDS = 8;
+const MAX_TOOL_ROUNDS = 20;
 
 export interface AgentCallbacks {
   onTextDelta: (text: string) => void;

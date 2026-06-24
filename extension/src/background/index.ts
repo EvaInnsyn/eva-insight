@@ -42,6 +42,33 @@ chrome.runtime.onInstalled.addListener(() => {
   console.log("[eva-insight] background installed");
 });
 
+// --- Service-worker keepalive -------------------------------------------
+// Chrome MV3 workers terminate after ~30 s idle. Between tool-call rounds
+// there can be a gap where the fetch is done but the next hasn't started;
+// an alarm every 25 s prevents termination during long agentic runs.
+const KEEPALIVE_ALARM = "eva-keepalive";
+let activeStreamCount = 0;
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === KEEPALIVE_ALARM) {
+    // No-op: being invoked is enough to reset the idle timer.
+  }
+});
+
+function startKeepAlive() {
+  activeStreamCount++;
+  if (activeStreamCount === 1) {
+    chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 25 / 60 });
+  }
+}
+
+function stopKeepAlive() {
+  activeStreamCount = Math.max(0, activeStreamCount - 1);
+  if (activeStreamCount === 0) {
+    chrome.alarms.clear(KEEPALIVE_ALARM);
+  }
+}
+
 // One-click toolbar → open side panel.
 chrome.sidePanel
   .setPanelBehavior({ openPanelOnActionClick: true })
@@ -142,6 +169,7 @@ async function startStream(
 
   const controller = new AbortController();
   activeStreams.set(port, { controller, assistantMessageId });
+  startKeepAlive();
 
   // Captured for the platform session log (synced after the turn completes).
   const sessionActions: SessionAction[] = [];
@@ -245,6 +273,7 @@ async function startStream(
       message,
     });
   } finally {
+    stopKeepAlive();
     if (activeStreams.get(port)?.controller === controller) {
       activeStreams.delete(port);
     }
