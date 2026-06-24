@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useChat } from "./hooks/useChat";
 import { useSettings } from "./hooks/useSettings";
+import { useActiveTab } from "./hooks/useActiveTab";
 import { ChatList } from "./components/ChatList";
 import { Composer } from "./components/Composer";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -28,6 +29,7 @@ export function App() {
     decideConfirm,
   } = useChat();
   const { isConfigured, loaded: settingsLoaded } = useSettings();
+  const activeTab = useActiveTab();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // First-run: auto-open settings exactly once if we boot up unconfigured.
@@ -75,6 +77,19 @@ export function App() {
 
       <Settings open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
+      {activeTab ? (
+        <div className={`eva-tab-strip ${activeTab.protected ? "eva-tab-strip-protected" : ""}`}>
+          {activeTab.favIconUrl && !activeTab.protected ? (
+            <img src={activeTab.favIconUrl} alt="" className="eva-tab-favicon" />
+          ) : (
+            <PageIcon />
+          )}
+          <span className="eva-tab-title">
+            {activeTab.protected ? "System page — Eva can't read this" : (activeTab.title || activeTab.domain)}
+          </span>
+        </div>
+      ) : null}
+
       {!isConfigured && !settingsOpen ? (
         <div className="eva-banner">
           <span>Set the proxy URL and shared secret to start chatting.</span>
@@ -111,6 +126,17 @@ export function App() {
         />
       ) : null}
     </div>
+  );
+}
+
+function PageIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M3 9h18" />
+      <circle cx="7.5" cy="6" r="0.75" fill="currentColor" stroke="none" />
+      <circle cx="10.5" cy="6" r="0.75" fill="currentColor" stroke="none" />
+    </svg>
   );
 }
 
