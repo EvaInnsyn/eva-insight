@@ -702,41 +702,39 @@ textarea {
   margin: 4px 0 2px;
 }
 
-/* Whole eye blinks slowly */
+/* Whole eye blinks slowly — synced to the 5 s look-around cycle */
 .eva-eye-svg {
   display: block;
-  animation: eva-eye-blink 4s ease-in-out infinite;
+  animation: eva-eye-blink 5s ease-in-out infinite;
   transform-origin: 24px 15px;
 }
 
 @keyframes eva-eye-blink {
   0%,
-  82%,
+  78%,
   100% {
     transform: scaleY(1);
   }
-  88% {
+  84% {
     transform: scaleY(0.06);
   }
-  94% {
+  90% {
     transform: scaleY(1);
   }
 }
 
-/* Pupil orbits around the iris centre */
+/* Pupil glances to four spots, pauses at each, returns to centre, then blinks */
 .eva-eye-pupil {
-  transform-box: fill-box;
-  transform-origin: center center;
-  animation: eva-eye-orbit 2.2s linear infinite;
+  animation: eva-eye-look 5s ease-in-out infinite;
 }
 
-@keyframes eva-eye-orbit {
-  from {
-    transform: rotate(0deg) translateY(-5px) rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg) translateY(-5px) rotate(-360deg);
-  }
+@keyframes eva-eye-look {
+  0%,   8% { transform: translate(0px,    0px);  }
+  16%, 28% { transform: translate(-3px,   1px);  }
+  36%, 48% { transform: translate(2.5px, -2px);  }
+  56%, 66% { transform: translate(2.5px,  2px);  }
+  74%, 82% { transform: translate(-2px,   1.5px);}
+  90%,100% { transform: translate(0px,    0px);  }
 }
 
 /* ---------- Composer ---------- */
