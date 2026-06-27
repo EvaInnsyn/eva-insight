@@ -53,6 +53,13 @@ export function initDb(filepath = "data/eva.db"): Database.Database {
     CREATE INDEX IF NOT EXISTS users_token_idx ON users(token);
   `);
 
+  // Add supabase_user_id column if this is an existing DB without it.
+  const cols = db.prepare("PRAGMA table_info(users)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "supabase_user_id")) {
+    db.exec(`ALTER TABLE users ADD COLUMN supabase_user_id TEXT;`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS users_supabase_uid_idx ON users(supabase_user_id) WHERE supabase_user_id IS NOT NULL;`);
+  }
+
   return db;
 }
 
@@ -67,6 +74,47 @@ export function findUserByToken(token: string): User | undefined {
   return getDb()
     .prepare<[string], User>("SELECT * FROM users WHERE token = ?")
     .get(token);
+}
+
+export function findUserBySupabaseId(supabaseUserId: string): User | undefined {
+  return getDb()
+    .prepare<[string], User>("SELECT * FROM users WHERE supabase_user_id = ?")
+    .get(supabaseUserId);
+}
+
+/**
+ * Returns the user for this Supabase ID, creating a record on first access.
+ * This is the normal sign-in path for Eva platform users.
+ */
+export function findOrCreateUserBySupabaseId(
+  supabaseUserId: string,
+  email: string,
+): User {
+  const existing = findUserBySupabaseId(supabaseUserId);
+  if (existing) return existing;
+
+  const id = randomUUID();
+  const token = `tok_${randomBytes(24).toString("hex")}`;
+  const now = new Date().toISOString();
+  const periodKey = currentPeriodKey();
+
+  getDb()
+    .prepare(
+      `INSERT INTO users (id, name, token, supabase_user_id, monthly_cap_input_tokens, monthly_cap_output_tokens, period_input_tokens, period_output_tokens, period_key, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?)`,
+    )
+    .run(
+      id,
+      email,
+      token,
+      supabaseUserId,
+      1_000_000,
+      200_000,
+      periodKey,
+      now,
+    );
+
+  return findUserBySupabaseId(supabaseUserId)!;
 }
 
 export function listUsers(): User[] {

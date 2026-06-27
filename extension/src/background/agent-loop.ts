@@ -47,6 +47,8 @@ export interface AgentCallbacks {
 
 export interface AgentLoopArgs {
   settings: EvaSettings;
+  /** Supabase access token for Railway auth — overrides settings.sharedSecret. */
+  accessToken?: string | null;
   initialMessages: ProxyMessage[];
   signal: AbortSignal;
   callbacks: AgentCallbacks;
@@ -57,7 +59,7 @@ export interface AgentLoopArgs {
 export async function runAgentLoop(
   args: AgentLoopArgs,
 ): Promise<{ info: ChatStopInfo; messages: ProxyMessage[] }> {
-  const { settings, signal, callbacks } = args;
+  const { settings, accessToken, signal, callbacks } = args;
   const messages: ProxyMessage[] = [...args.initialMessages];
 
   // Live copy of allowed domains (we may add to it mid-loop).
@@ -70,6 +72,7 @@ export async function runAgentLoop(
 
     const result = await runChat({
       settings,
+      accessToken,
       system: EVA_SYSTEM_PROMPT,
       messages,
       tools: EVA_TOOLS,

@@ -26,6 +26,8 @@ export interface ToolUseBlock {
 
 export interface RunChatArgs {
   settings: EvaSettings;
+  /** Supabase access token — takes priority over settings.sharedSecret. */
+  accessToken?: string | null;
   system: string;
   messages: ProxyMessage[];
   tools: ToolSchema[];
@@ -65,6 +67,7 @@ interface BlockState {
 export async function runChat(args: RunChatArgs): Promise<RunChatResult> {
   const {
     settings,
+    accessToken,
     system,
     messages,
     tools,
@@ -73,12 +76,15 @@ export async function runChat(args: RunChatArgs): Promise<RunChatResult> {
     onToolUseStart,
   } = args;
 
+  // Prefer the live Supabase JWT; fall back to the dev shared secret.
+  const bearerToken = accessToken ?? settings.sharedSecret;
+
   const url = new URL("/v1/chat", settings.proxyUrl).toString();
   const response = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${settings.sharedSecret}`,
+      Authorization: `Bearer ${bearerToken}`,
     },
     body: JSON.stringify({
       system,

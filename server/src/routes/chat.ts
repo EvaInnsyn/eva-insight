@@ -46,7 +46,7 @@ chatRoute.post("/", async (c) => {
 
   // --- Bearer auth + per-user cap ------------------------------------
   const authHeader = c.req.header("authorization") ?? undefined;
-  const auth = authenticate(authHeader, env.EVA_INSIGHT_SHARED_SECRET);
+  const auth = await authenticate(authHeader, env.EVA_INSIGHT_SHARED_SECRET, env.SUPABASE_URL);
   if ("error" in auth) return authErrorResponse(c, auth.error);
   const user = auth.user; // null when authed via dev shared secret
 

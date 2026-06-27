@@ -13,11 +13,12 @@ import { periodResetsAt } from "../db.js";
 
 export const meRoute = new Hono();
 
-meRoute.get("/", (c) => {
+meRoute.get("/", async (c) => {
   const env = loadEnv();
-  const auth = authenticate(
+  const auth = await authenticate(
     c.req.header("authorization") ?? undefined,
     env.EVA_INSIGHT_SHARED_SECRET,
+    env.SUPABASE_URL,
   );
   if ("error" in auth) return authErrorResponse(c, auth.error);
 

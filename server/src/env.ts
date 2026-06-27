@@ -20,6 +20,7 @@ const EVA_KEYS = [
   "EVA_INSIGHT_DEFAULT_MODEL",
   "EVA_INSIGHT_DB_PATH",
   "EVA_INSIGHT_ADMIN_PASSWORD",
+  "SUPABASE_URL",
 ] as const;
 
 for (const key of EVA_KEYS) {
@@ -55,6 +56,11 @@ const EnvSchema = z.object({
   EVA_INSIGHT_DB_PATH: z.string().default("data/eva.db"),
   /** Password for the /admin panel. If unset, admin is disabled (503). */
   EVA_INSIGHT_ADMIN_PASSWORD: z.string().min(8).optional(),
+  /**
+   * Supabase project URL — used to fetch JWKS and validate user JWTs.
+   * e.g. https://joqeipjawrlnscdvsgna.supabase.co
+   */
+  SUPABASE_URL: z.string().url().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

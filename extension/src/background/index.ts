@@ -15,7 +15,7 @@ import {
   type SidePanelToBackground,
 } from "../shared/messages";
 import type { ChatMessage, ProxyMessage } from "../shared/chat";
-import { isConfigured, readSettings } from "./settings";
+import { readSettings } from "./settings";
 import { ProxyError } from "./proxy-client";
 import { runAgentLoop } from "./agent-loop";
 import { loadHistory, saveHistory } from "./session-store";
@@ -30,6 +30,7 @@ import {
   signIn as platformSignIn,
   signOut as platformSignOut,
   getStatus as platformStatus,
+  getAccessToken,
 } from "./platform-auth";
 import { pushSession, describeAction } from "./platform-sync";
 import type {
@@ -156,13 +157,24 @@ async function startStream(
   if (prior) prior.controller.abort();
 
   const settings = await readSettings();
-  if (!isConfigured(settings)) {
+  const accessToken = await getAccessToken();
+
+  // Require either a Supabase login (accessToken) or a dev shared secret.
+  if (!settings.proxyUrl.trim()) {
     safePost(port, {
       type: "chat/error",
       assistantMessageId,
       errorType: "not_configured",
-      message:
-        "Set the proxy URL and shared secret in the side panel settings.",
+      message: "Proxy URL is missing — open Settings and sign in to Eva.",
+    });
+    return;
+  }
+  if (!accessToken && !settings.sharedSecret.trim()) {
+    safePost(port, {
+      type: "chat/error",
+      assistantMessageId,
+      errorType: "not_configured",
+      message: "Sign in to your Eva account to start chatting.",
     });
     return;
   }
@@ -178,6 +190,7 @@ async function startStream(
   try {
     const { info } = await runAgentLoop({
       settings,
+      accessToken,
       initialMessages: messages,
       signal: controller.signal,
       callbacks: {
