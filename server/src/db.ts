@@ -42,8 +42,8 @@ export function initDb(filepath = "data/eva.db"): Database.Database {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       token TEXT NOT NULL UNIQUE,
-      monthly_cap_input_tokens INTEGER NOT NULL DEFAULT 1000000,
-      monthly_cap_output_tokens INTEGER NOT NULL DEFAULT 200000,
+      monthly_cap_input_tokens INTEGER NOT NULL DEFAULT 25000000,
+      monthly_cap_output_tokens INTEGER NOT NULL DEFAULT 1500000,
       period_input_tokens INTEGER NOT NULL DEFAULT 0,
       period_output_tokens INTEGER NOT NULL DEFAULT 0,
       period_key TEXT NOT NULL,
@@ -108,8 +108,8 @@ export function findOrCreateUserBySupabaseId(
       email,
       token,
       supabaseUserId,
-      1_000_000,
-      200_000,
+      25_000_000,   // starter: ~$75 input at Sonnet 4.6 rates
+      1_500_000,    // starter: ~$22.50 output at Sonnet 4.6 rates ≈ $100 total
       periodKey,
       now,
     );
@@ -144,8 +144,8 @@ export function createUser(args: CreateUserArgs): User {
       id,
       args.name,
       token,
-      args.monthlyCapInputTokens ?? 1_000_000,
-      args.monthlyCapOutputTokens ?? 200_000,
+      args.monthlyCapInputTokens ?? 25_000_000,
+      args.monthlyCapOutputTokens ?? 1_500_000,
       periodKey,
       now,
     );
