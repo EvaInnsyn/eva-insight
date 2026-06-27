@@ -12,6 +12,7 @@ import {
   PLATFORM_AUTH_KEY,
   type PlatformStatus,
 } from "../shared/platform";
+import { readSettings, writeSettings } from "./settings";
 
 interface StoredAuth {
   accessToken: string;
@@ -82,6 +83,10 @@ export async function signIn(
   }
   const stored = toStored((await res.json()) as SupabaseTokenResponse);
   await write(stored);
+
+  // Auto-configure the proxy so the user never has to paste a token manually.
+  await fetchAndApplyProxyConfig(stored.accessToken).catch(() => {});
+
   return { connected: true, email: stored.email };
 }
 
@@ -135,4 +140,20 @@ export async function getAccessToken(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Fetches proxy URL + token from the platform and saves them to settings.
+ * Called automatically after sign-in so users never see the pairing token.
+ */
+async function fetchAndApplyProxyConfig(accessToken: string): Promise<void> {
+  const res = await fetch(`${PLATFORM.apiUrl}${PLATFORM.configPath}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) return;
+  const body = (await res.json()) as { data?: { proxyUrl?: string; proxyToken?: string } };
+  const { proxyUrl, proxyToken } = body.data ?? {};
+  if (!proxyUrl || !proxyToken) return;
+  const current = await readSettings();
+  await writeSettings({ ...current, proxyUrl, sharedSecret: proxyToken });
 }
