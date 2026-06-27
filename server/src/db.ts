@@ -4,19 +4,21 @@
  * One table: `users`. Schema migrations are handled in `initDb()` —
  * additive only (we never DROP) so existing deployments keep working.
  *
- * Default monthly caps: 1M input tokens + 200K output tokens per user
- * — roughly $5 + $5 = $10/user/month at Opus 4.6 pricing.
+ * Plans: INNSÝN ($45 cap), YFIRSÝN ($100 cap), UMSJÁ ($150 cap).
+ * See plans.ts for token limits per plan.
  */
 
 import Database from "better-sqlite3";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { PLANS, DEFAULT_PLAN, type PlanId } from "./plans.js";
 
 export interface User {
   id: string;
   name: string;
   token: string;
+  plan: PlanId;
   monthly_cap_input_tokens: number;
   monthly_cap_output_tokens: number;
   period_input_tokens: number;
@@ -53,11 +55,14 @@ export function initDb(filepath = "data/eva.db"): Database.Database {
     CREATE INDEX IF NOT EXISTS users_token_idx ON users(token);
   `);
 
-  // Add supabase_user_id column if this is an existing DB without it.
+  // Additive column migrations — never DROP, so old deployments stay working.
   const cols = db.prepare("PRAGMA table_info(users)").all() as { name: string }[];
   if (!cols.some((c) => c.name === "supabase_user_id")) {
     db.exec(`ALTER TABLE users ADD COLUMN supabase_user_id TEXT;`);
     db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS users_supabase_uid_idx ON users(supabase_user_id) WHERE supabase_user_id IS NOT NULL;`);
+  }
+  if (!cols.some((c) => c.name === "plan")) {
+    db.exec(`ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'innsyn';`);
   }
 
   return db;
@@ -98,18 +103,20 @@ export function findOrCreateUserBySupabaseId(
   const now = new Date().toISOString();
   const periodKey = currentPeriodKey();
 
+  const defaultPlan = PLANS[DEFAULT_PLAN];
   getDb()
     .prepare(
-      `INSERT INTO users (id, name, token, supabase_user_id, monthly_cap_input_tokens, monthly_cap_output_tokens, period_input_tokens, period_output_tokens, period_key, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?)`,
+      `INSERT INTO users (id, name, token, supabase_user_id, plan, monthly_cap_input_tokens, monthly_cap_output_tokens, period_input_tokens, period_output_tokens, period_key, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)`,
     )
     .run(
       id,
       email,
       token,
       supabaseUserId,
-      25_000_000,   // starter: ~$75 input at Sonnet 4.6 rates
-      1_500_000,    // starter: ~$22.50 output at Sonnet 4.6 rates ≈ $100 total
+      defaultPlan.id,
+      defaultPlan.monthlyCapInputTokens,
+      defaultPlan.monthlyCapOutputTokens,
       periodKey,
       now,
     );
@@ -191,6 +198,24 @@ export function findUserById(userId: string): User | undefined {
   return getDb()
     .prepare<[string], User>("SELECT * FROM users WHERE id = ?")
     .get(userId);
+}
+
+/**
+ * Change a user's plan and update their token caps immediately.
+ * Called by the payment webhook after a successful Kling charge.
+ */
+export function setUserPlan(userId: string, planId: PlanId): User | undefined {
+  const plan = PLANS[planId];
+  getDb()
+    .prepare(
+      `UPDATE users
+       SET plan = ?,
+           monthly_cap_input_tokens = ?,
+           monthly_cap_output_tokens = ?
+       WHERE id = ?`,
+    )
+    .run(plan.id, plan.monthlyCapInputTokens, plan.monthlyCapOutputTokens, userId);
+  return findUserById(userId);
 }
 
 /** Roll counters over if the user's period_key is stale. */

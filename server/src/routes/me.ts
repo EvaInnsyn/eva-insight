@@ -33,6 +33,7 @@ meRoute.get("/", async (c) => {
   return c.json({
     mode: "metered",
     name: u.name,
+    plan: u.plan ?? "innsyn",
     cap: {
       input_tokens: u.monthly_cap_input_tokens,
       output_tokens: u.monthly_cap_output_tokens,
