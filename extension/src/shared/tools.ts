@@ -154,22 +154,6 @@ export const EVA_TOOLS: ToolSchema[] = [
     },
   },
   {
-    name: "javascript_eval",
-    description:
-      "Run arbitrary JavaScript in the page's main world and return the result. The script's last expression is the return value. Use for cases the a11y tree can't cover (computed styles, hidden state, custom widgets). The user must approve every call.",
-    input_schema: {
-      type: "object",
-      properties: {
-        script: {
-          type: "string",
-          description:
-            "JavaScript expression or block. Will be wrapped in (function(){ ... })() if it lacks a return statement.",
-        },
-      },
-      required: ["script"],
-    },
-  },
-  {
     name: "tabs_list",
     description:
       "List the user's open tabs in the current window. Returns id, url, title, and active flag for each tab.",
@@ -222,7 +206,6 @@ export const EVA_TOOLS: ToolSchema[] = [
 
 /** Tool calls that always require a user confirmation, no exceptions. */
 const ALWAYS_CONFIRM = new Set([
-  "javascript_eval",
   "tabs_close",
 ]);
 
@@ -240,14 +223,6 @@ export function needsConfirmation(
   context: { activeOrigin?: string; allowedDomains: string[] },
 ): { prompt: string; allowAlways?: { kind: "domain"; origin: string } } | null {
   if (ALWAYS_CONFIRM.has(toolName)) {
-    if (toolName === "javascript_eval") {
-      const script =
-        (input as { script?: string } | null)?.script ?? "(empty)";
-      const preview = script.length > 200 ? script.slice(0, 199) + "…" : script;
-      return {
-        prompt: `Run JavaScript on this page?\n\n${preview}`,
-      };
-    }
     if (toolName === "tabs_close") {
       return { prompt: "Close this browser tab?" };
     }
@@ -286,7 +261,6 @@ export type EvaToolName =
   | "navigate"
   | "screenshot"
   | "form_input"
-  | "javascript_eval"
   | "tabs_list"
   | "tabs_create"
   | "tabs_switch"

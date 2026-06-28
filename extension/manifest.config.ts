@@ -5,8 +5,7 @@ export default defineManifest({
   manifest_version: 3,
   name: "Eva Insight",
   description: "AI side panel that reads and acts on the web.",
-  version: pkg.version || "0.0.0",
-  version_name: "0.0.0-dev",
+  version: pkg.version,
   action: {
     default_title: "Open Eva Insight",
   },
@@ -33,9 +32,12 @@ export default defineManifest({
     "storage",
     "alarms",
     "webNavigation",
-    "debugger",
   ],
   host_permissions: ["<all_urls>"],
+  content_security_policy: {
+    extension_pages:
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src https:;",
+  },
   icons: {
     "16": "icons/icon-16.png",
     "48": "icons/icon-48.png",

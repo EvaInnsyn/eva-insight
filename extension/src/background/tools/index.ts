@@ -112,39 +112,6 @@ const HANDLERS: Record<EvaToolName, ToolHandler> = {
     return await formInputInActivePage(element_id, value);
   },
 
-  async javascript_eval({ script }: { script: string }) {
-    requireString(script, "script");
-    const tab = await getActiveTab();
-    if (tab.id === undefined) throw new Error("active tab has no id");
-    // Wrap so a non-return-statement script's last expression becomes the
-    // returned value, mirroring devtools console behavior.
-    const wrapped = `(function(){ return (${script}); })()`;
-    const fallback = `(function(){ ${script} })()`;
-    let executed: chrome.scripting.InjectionResult[];
-    try {
-      executed = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        world: "MAIN",
-        func: new Function(`return ${wrapped};`) as () => unknown,
-      });
-    } catch {
-      executed = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        world: "MAIN",
-        func: new Function(`${fallback};`) as () => unknown,
-      });
-    }
-    const result = executed[0]?.result;
-    // Try to serialize — strip functions / cycles
-    let safe: unknown;
-    try {
-      safe = JSON.parse(JSON.stringify(result));
-    } catch {
-      safe = String(result);
-    }
-    return { result: safe };
-  },
-
   async tabs_list() {
     const tabs = await chrome.tabs.query({ currentWindow: true });
     return tabs.map((t) => ({
