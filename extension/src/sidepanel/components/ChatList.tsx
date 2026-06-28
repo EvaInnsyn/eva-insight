@@ -14,9 +14,9 @@ export function ChatList({ messages }: { messages: ChatMessage[] }) {
     return (
       <div className="eva-empty">
         <img src="/eye-large.png" alt="" className="eva-empty-eye" />
-        <div className="eva-empty-headline">Ask Eva anything.</div>
+        <div className="eva-empty-headline">Eva, your digital employee.</div>
         <div className="eva-empty-sub">
-          Your undercover marketing director — analyzes, solves, delivers.
+          Can switch from marketer to accountant to developer to HR manager instantly.
         </div>
       </div>
     );

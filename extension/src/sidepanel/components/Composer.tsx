@@ -59,7 +59,7 @@ export function Composer({
               ? "Configure settings to start chatting"
               : streaming
                 ? "Streaming…"
-                : "Message Eva — Enter to send, Shift+Enter for newline"
+                : "Message Eva…"
           }
           value={value}
           onChange={(e) => setValue(e.target.value)}
