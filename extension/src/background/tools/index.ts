@@ -23,7 +23,16 @@ export type ToolHandler = (input: any) => Promise<unknown>;
 
 const HANDLERS: Record<EvaToolName, ToolHandler> = {
   async read_page() {
-    return await readActivePage();
+    const snapshot = await readActivePage();
+    const json = JSON.stringify(snapshot);
+    // Webflow and other complex sites can produce enormous snapshots.
+    // Cap at 40K chars (~10K tokens) so a single read never blows the context.
+    if (json.length <= 40_000) return snapshot;
+    return {
+      _truncated: true,
+      _note: "Page snapshot was too large and has been truncated to fit the context window. Focus on visible elements only.",
+      data: json.slice(0, 40_000),
+    };
   },
 
   async get_active_tab() {
