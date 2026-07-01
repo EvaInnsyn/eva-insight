@@ -51,7 +51,7 @@ const EnvSchema = z.object({
     .string()
     .default("chrome-extension://kkjnkjiclpmfkadlmjkjednknilknnhl"),
   /** Default Anthropic model when the client omits it. */
-  EVA_INSIGHT_DEFAULT_MODEL: z.string().default("claude-opus-4-8"),
+  EVA_INSIGHT_DEFAULT_MODEL: z.string().default("claude-sonnet-4-6"),
   /** SQLite DB path. Created on startup if missing. */
   EVA_INSIGHT_DB_PATH: z.string().default("data/eva.db"),
   /** Password for the /admin panel. If unset, admin is disabled (503). */
