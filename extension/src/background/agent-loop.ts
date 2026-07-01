@@ -25,6 +25,32 @@ import { getActiveTab } from "./page-bridge";
 
 const MAX_TOOL_ROUNDS = 20;
 
+// ~400K chars ≈ 100K tokens — leaves headroom for system prompt, tools, and output.
+const MAX_HISTORY_CHARS = 400_000;
+
+/**
+ * Trims old messages when the conversation grows too large.
+ * Always cuts at a "clean" user turn (string content = real question)
+ * so tool_use/tool_result pairs are never split.
+ */
+function pruneMessages(messages: ProxyMessage[]): ProxyMessage[] {
+  if (JSON.stringify(messages).length <= MAX_HISTORY_CHARS) return messages;
+
+  // Find indices where a real user question starts (string content, not tool results).
+  const cleanStarts = messages
+    .map((m, i) => ({ m, i }))
+    .filter(({ m }) => m.role === "user" && typeof m.content === "string");
+
+  // Walk from most-recent clean start backwards until the slice fits.
+  for (let j = cleanStarts.length - 1; j >= 0; j--) {
+    const slice = messages.slice(cleanStarts[j].i);
+    if (JSON.stringify(slice).length <= MAX_HISTORY_CHARS) return slice;
+  }
+
+  // Last resort: just the final 2 messages.
+  return messages.slice(-2);
+}
+
 export interface AgentCallbacks {
   onTextDelta: (text: string) => void;
   onToolStart: (block: ToolUseBlock, startedAt: string) => void;
@@ -74,7 +100,7 @@ export async function runAgentLoop(
       settings,
       accessToken,
       system: EVA_SYSTEM_PROMPT,
-      messages,
+      messages: pruneMessages(messages),
       tools: EVA_TOOLS,
       signal,
       onTextDelta: callbacks.onTextDelta,
