@@ -4,7 +4,7 @@ import pkg from "./package.json" with { type: "json" };
 export default defineManifest({
   manifest_version: 3,
   name: "Eva Innsýn",
-  description: "AI side panel that reads and acts on the web.",
+  description: "Your digital employee. Switches from accountant to marketer to HR manager to programmer — instantly.",
   version: pkg.version,
   action: {
     default_title: "Open Eva Innsýn",
