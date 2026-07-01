@@ -23,6 +23,15 @@ export default defineManifest({
       run_at: "document_idle",
       all_frames: false,
     },
+    {
+      matches: [
+        "https://app.evai.is/*",
+        "https://eva-innsyn.vercel.app/*",
+      ],
+      js: ["src/content/platform-session-relay.ts"],
+      run_at: "document_idle",
+      all_frames: false,
+    },
   ],
   permissions: [
     "sidePanel",

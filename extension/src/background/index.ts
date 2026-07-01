@@ -31,6 +31,7 @@ import {
   signOut as platformSignOut,
   getStatus as platformStatus,
   getAccessToken,
+  syncSession as platformSyncSession,
 } from "./platform-auth";
 import { pushSession, describeAction } from "./platform-sync";
 import type {
@@ -359,6 +360,23 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         } satisfies PlatformResponse),
       );
     return true;
+  }
+
+  // Auto-connect: content script on app.evai.is relays the platform session.
+  if (m.type === "platform/syncSession") {
+    platformSyncSession(
+      m as {
+        type: string;
+        accessToken: string;
+        refreshToken: string;
+        expiresAt: number;
+        email: string;
+        userId: string;
+      },
+    ).catch((err) =>
+      console.warn("[eva-insight] session relay failed:", err),
+    );
+    return false;
   }
 
   return false;

@@ -143,6 +143,37 @@ export async function getAccessToken(): Promise<string | null> {
 }
 
 /**
+ * Stores a session received from the platform-session-relay content script.
+ * No password exchange needed — the content script already has valid tokens
+ * from the platform's own sign-in flow.
+ */
+export async function syncSession(params: {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+  email: string;
+  userId: string;
+}): Promise<PlatformStatus> {
+  const existing = await read();
+  // If we already hold the same token, skip the re-write + proxy fetch.
+  if (existing?.accessToken === params.accessToken) {
+    return { connected: true, email: existing.email };
+  }
+
+  await write({
+    accessToken: params.accessToken,
+    refreshToken: params.refreshToken,
+    expiresAt: params.expiresAt,
+    email: params.email,
+    userId: params.userId,
+  });
+
+  await fetchAndApplyProxyConfig(params.accessToken).catch(() => {});
+
+  return { connected: true, email: params.email };
+}
+
+/**
  * Fetches proxy URL + token from the platform and saves them to settings.
  * Called automatically after sign-in so users never see the pairing token.
  */
