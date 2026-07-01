@@ -2,12 +2,30 @@ import { useEffect, useRef } from "react";
 import type { ChatMessage } from "@/shared/chat";
 import { Message } from "./Message";
 
-export function ChatList({ messages }: { messages: ChatMessage[] }) {
-  const endRef = useRef<HTMLDivElement>(null);
+const SCROLL_THRESHOLD = 80;
 
-  // Auto-scroll to bottom on new content.
+export function ChatList({ messages }: { messages: ChatMessage[] }) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+  const userScrolledUp = useRef(false);
+
+  // Track whether the user has scrolled away from the bottom.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    const el = listRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      userScrolledUp.current = distanceFromBottom > SCROLL_THRESHOLD;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Auto-scroll only when the user is already near the bottom.
+  useEffect(() => {
+    if (!userScrolledUp.current) {
+      endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
   }, [messages]);
 
   if (messages.length === 0) {
@@ -23,7 +41,7 @@ export function ChatList({ messages }: { messages: ChatMessage[] }) {
   }
 
   return (
-    <div className="eva-list">
+    <div className="eva-list" ref={listRef}>
       {messages.map((m) => (
         <Message key={m.id} message={m} />
       ))}
