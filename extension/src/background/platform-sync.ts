@@ -41,7 +41,7 @@ export async function pushSession(
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
-        title: payload.title.slice(0, 200) || "Eva Insight session",
+        title: payload.title.slice(0, 200) || "Eva Innsýn session",
         // Platform caps actions at 500 and validates each shape.
         actions: payload.actions.slice(0, 500).map((a) => ({
           type: a.type.slice(0, 60),

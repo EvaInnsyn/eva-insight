@@ -447,5 +447,5 @@ function deriveSessionTitle(messages: ProxyMessage[]): string {
       return m.content.trim();
     }
   }
-  return "Eva Insight session";
+  return "Eva Innsýn session";
 }

@@ -3,11 +3,11 @@ import pkg from "./package.json" with { type: "json" };
 
 export default defineManifest({
   manifest_version: 3,
-  name: "Eva Insight",
+  name: "Eva Innsýn",
   description: "AI side panel that reads and acts on the web.",
   version: pkg.version,
   action: {
-    default_title: "Open Eva Insight",
+    default_title: "Open Eva Innsýn",
   },
   background: {
     service_worker: "src/background/index.ts",

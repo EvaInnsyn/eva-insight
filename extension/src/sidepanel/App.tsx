@@ -46,7 +46,7 @@ export function App() {
       <header className="eva-header">
         <div className="eva-logo">
           <img src={EYE_LOGO} alt="" className="eva-logo-img" />
-          <span className="eva-logo-name">Eva Insight</span>
+          <span className="eva-logo-name">Eva Innsýn</span>
         </div>
         <div className="eva-header-actions">
           {messages.length > 0 ? (
