@@ -24,6 +24,12 @@ export interface ToolUseBlock {
   input: unknown;
 }
 
+/** Thinking block returned by the model — must be replayed in subsequent turns. */
+export interface ThinkingBlock {
+  type: "thinking";
+  thinking: string;
+}
+
 export interface RunChatArgs {
   settings: EvaSettings;
   /** Supabase access token — takes priority over settings.sharedSecret. */
@@ -41,6 +47,8 @@ export interface RunChatResult {
   text: string;
   /** Tool calls the model wants executed. */
   toolUses: ToolUseBlock[];
+  /** Thinking blocks from this turn — must be included in subsequent assistant messages. */
+  thinkingBlocks: ThinkingBlock[];
   /** Stop info (end_turn / tool_use / max_tokens / refusal / aborted). */
   info: ChatStopInfo;
 }
@@ -57,11 +65,12 @@ export class ProxyError extends Error {
 
 interface BlockState {
   index: number;
-  type: "text" | "tool_use" | "other";
+  type: "text" | "tool_use" | "thinking" | "other";
   text?: string;
   toolUseId?: string;
   toolUseName?: string;
   toolUseJsonBuf?: string;
+  thinkingBuf?: string;
 }
 
 export async function runChat(args: RunChatArgs): Promise<RunChatResult> {
@@ -90,7 +99,8 @@ export async function runChat(args: RunChatArgs): Promise<RunChatResult> {
       system,
       messages,
       tools,
-      max_tokens: 8192,
+      thinking: { type: "adaptive" },
+      max_tokens: 32768,
     }),
     signal,
   });
@@ -110,6 +120,7 @@ export async function runChat(args: RunChatArgs): Promise<RunChatResult> {
   const blocks = new Map<number, BlockState>();
   let text = "";
   const toolUses: ToolUseBlock[] = [];
+  const thinkingBlocks: ThinkingBlock[] = [];
   let info: ChatStopInfo = { stop_reason: null };
 
   for await (const ev of parseSseStream(response.body, signal)) {
@@ -136,14 +147,9 @@ export async function runChat(args: RunChatArgs): Promise<RunChatResult> {
             toolUseName: cb.name,
             toolUseJsonBuf: "",
           });
-          // Emit early so the UI can show "Eva is using <tool>…" right away.
-          // Final parsed input is fired internally via onToolUseStart for now
-          // — Phase 4 UI doesn't act on intermediate JSON, only the final.
-          onToolUseStart?.({
-            id: cb.id,
-            name: cb.name,
-            input: cb.input ?? {},
-          });
+          onToolUseStart?.({ id: cb.id, name: cb.name, input: cb.input ?? {} });
+        } else if (cb?.type === "thinking") {
+          blocks.set(index, { index, type: "thinking", thinkingBuf: "" });
         } else {
           blocks.set(index, { index, type: "other" });
         }
@@ -159,12 +165,11 @@ export async function runChat(args: RunChatArgs): Promise<RunChatResult> {
           block.text = (block.text ?? "") + chunk;
           text += chunk;
           onTextDelta(chunk);
-        } else if (
-          delta?.type === "input_json_delta" &&
-          block.type === "tool_use"
-        ) {
+        } else if (delta?.type === "input_json_delta" && block.type === "tool_use") {
           block.toolUseJsonBuf =
             (block.toolUseJsonBuf ?? "") + String(delta.partial_json ?? "");
+        } else if (delta?.type === "thinking_delta" && block.type === "thinking") {
+          block.thinkingBuf = (block.thinkingBuf ?? "") + String(delta.thinking ?? "");
         }
         break;
       }
@@ -181,11 +186,9 @@ export async function runChat(args: RunChatArgs): Promise<RunChatResult> {
               input = { _raw: raw };
             }
           }
-          toolUses.push({
-            id: block.toolUseId!,
-            name: block.toolUseName!,
-            input,
-          });
+          toolUses.push({ id: block.toolUseId!, name: block.toolUseName!, input });
+        } else if (block?.type === "thinking" && (block.thinkingBuf ?? "").length > 0) {
+          thinkingBlocks.push({ type: "thinking", thinking: block.thinkingBuf! });
         }
         break;
       }
@@ -205,7 +208,7 @@ export async function runChat(args: RunChatArgs): Promise<RunChatResult> {
     }
   }
 
-  return { text, toolUses, info };
+  return { text, toolUses, thinkingBlocks, info };
 }
 
 function extractStopInfo(payload: any, prev: ChatStopInfo): ChatStopInfo {

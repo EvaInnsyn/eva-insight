@@ -29,6 +29,45 @@ const MAX_TOOL_ROUNDS = 20;
 const MAX_HISTORY_CHARS = 400_000;
 
 /**
+ * Converts a tool result output string into the right Anthropic content shape.
+ * Screenshot results carry base64 image data and need to be sent as image
+ * content blocks so Claude can actually see them (not read them as text).
+ */
+function buildToolResultContent(output: string, isError: boolean): unknown {
+  if (isError) return output;
+  try {
+    const parsed = JSON.parse(output) as {
+      mime_type?: string;
+      base64?: string;
+      url?: string;
+      title?: string;
+    };
+    if (
+      typeof parsed.mime_type === "string" &&
+      parsed.mime_type.startsWith("image/") &&
+      typeof parsed.base64 === "string"
+    ) {
+      const blocks: unknown[] = [
+        {
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: parsed.mime_type,
+            data: parsed.base64,
+          },
+        },
+      ];
+      const label = [parsed.title, parsed.url].filter(Boolean).join(" · ");
+      if (label) blocks.push({ type: "text", text: label });
+      return blocks;
+    }
+  } catch {
+    // Not JSON — send as-is.
+  }
+  return output;
+}
+
+/**
  * Trims old messages when the conversation grows too large.
  * Always cuts at a "clean" user turn (string content = real question)
  * so tool_use/tool_result pairs are never split.
@@ -117,18 +156,16 @@ export async function runAgentLoop(
       break;
     }
 
-    // Assistant turn with tool_use blocks
+    // Assistant turn: thinking blocks must precede text + tool_use (API requirement).
     const assistantBlocks: unknown[] = [];
+    for (const tb of result.thinkingBlocks) {
+      assistantBlocks.push({ type: "thinking", thinking: tb.thinking });
+    }
     if (result.text.length > 0) {
       assistantBlocks.push({ type: "text", text: result.text });
     }
     for (const tu of result.toolUses) {
-      assistantBlocks.push({
-        type: "tool_use",
-        id: tu.id,
-        name: tu.name,
-        input: tu.input,
-      });
+      assistantBlocks.push({ type: "tool_use", id: tu.id, name: tu.name, input: tu.input });
     }
     messages.push({ role: "assistant", content: assistantBlocks });
 
@@ -188,7 +225,7 @@ export async function runAgentLoop(
       toolResultBlocks.push({
         type: "tool_result",
         tool_use_id: tu.id,
-        content: output,
+        content: buildToolResultContent(output, isError),
         ...(isError ? { is_error: true } : {}),
       });
     }
