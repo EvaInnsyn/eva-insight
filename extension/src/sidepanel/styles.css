@@ -719,6 +719,18 @@ textarea {
   border-radius: 8px;
 }
 
+.eva-usage-plan {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--eva-text-on-red);
+  background: var(--eva-frame);
+  border-radius: 4px;
+  padding: 1px 6px;
+  align-self: flex-start;
+}
+
 .eva-usage-label {
   font-size: 10px;
   text-transform: uppercase;

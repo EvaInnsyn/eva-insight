@@ -29,9 +29,13 @@ export function UsageBar({ info, error }: Props) {
   const pct = Math.min(100, Math.round((used / Math.max(1, cap)) * 100));
   const high = pct >= 80;
   const resetsDate = formatResetDate(info.period.resets_at);
+  const planLabel = info.plan ? formatPlanName(info.plan) : null;
 
   return (
     <div className="eva-usage">
+      {planLabel && (
+        <div className="eva-usage-plan">{planLabel}</div>
+      )}
       <div className="eva-usage-label">
         Usage · resets {resetsDate}
       </div>
@@ -49,6 +53,19 @@ export function UsageBar({ info, error }: Props) {
       </div>
     </div>
   );
+}
+
+const PLAN_LABELS: Record<string, string> = {
+  innsyn: 'INNSÝN',
+  'innsýn': 'INNSÝN',
+  yfirsyn: 'YFIRSÝN',
+  'yfirsýn': 'YFIRSÝN',
+  umsja: 'UMSJÁ',
+  'umsjá': 'UMSJÁ',
+};
+
+function formatPlanName(plan: string): string {
+  return PLAN_LABELS[plan.toLowerCase()] ?? plan.toUpperCase();
 }
 
 function fmt(n: number): string {

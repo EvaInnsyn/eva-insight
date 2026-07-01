@@ -10,6 +10,7 @@ import { useSettings } from "./useSettings";
 export type UsageInfo =
   | {
       mode: "metered";
+      plan?: string;
       name: string;
       cap: { input_tokens: number; output_tokens: number };
       used: { input_tokens: number; output_tokens: number };
