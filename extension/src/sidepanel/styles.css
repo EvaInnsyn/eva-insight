@@ -814,8 +814,23 @@ textarea {
 /* ---------- Thinking eye ---------- */
 
 .eva-thinking-eye {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   margin: 4px 0 2px;
+}
+
+.eva-thinking-label {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--eva-text-dim);
+  letter-spacing: 0.2px;
+  animation: eva-thinking-dots 1.6s ease-in-out infinite;
+}
+
+@keyframes eva-thinking-dots {
+  0%, 60%, 100% { opacity: 1; }
+  30%            { opacity: 0.35; }
 }
 
 /* Whole eye blinks slowly — synced to the 5 s look-around cycle */
