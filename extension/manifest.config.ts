@@ -36,7 +36,7 @@ export default defineManifest({
   host_permissions: ["<all_urls>"],
   content_security_policy: {
     extension_pages:
-      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src https:;",
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src https:; img-src https: data: 'self';",
   },
   icons: {
     "16": "icons/icon-16.png",
