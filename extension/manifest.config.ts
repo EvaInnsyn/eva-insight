@@ -41,6 +41,7 @@ export default defineManifest({
     "storage",
     "alarms",
     "webNavigation",
+    "debugger",
   ],
   host_permissions: ["<all_urls>"],
   content_security_policy: {

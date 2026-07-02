@@ -155,7 +155,75 @@ const HANDLERS: Record<EvaToolName, ToolHandler> = {
     await chrome.tabs.remove(tab_id);
     return { closed: tab_id };
   },
+
+  async click_at_coordinate({ x, y }: { x: number; y: number }) {
+    if (typeof x !== "number" || typeof y !== "number") {
+      throw new Error("x and y must be numbers");
+    }
+    const tab = await getActiveTab();
+    if (tab.id === undefined) throw new Error("no active tab");
+    await cdpMouseClick(tab.id, Math.round(x), Math.round(y));
+    return { clicked: { x, y } };
+  },
+
+  async key_press({ key, modifiers }: { key: string; modifiers?: string[] }) {
+    if (typeof key !== "string" || !key) throw new Error("key must be a non-empty string");
+    const tab = await getActiveTab();
+    if (tab.id === undefined) throw new Error("no active tab");
+    const mods = Array.isArray(modifiers) ? modifiers : [];
+    await cdpKeyPress(tab.id, key, mods);
+    return { pressed: key };
+  },
+
+  async wait({ ms }: { ms?: number }) {
+    const delay = Math.min(Math.max(ms ?? 800, 100), 5000);
+    await new Promise((r) => setTimeout(r, delay));
+    return { waited_ms: delay };
+  },
 };
+
+async function cdpMouseClick(tabId: number, x: number, y: number): Promise<void> {
+  const target = { tabId };
+  await chrome.debugger.attach(target, "1.3").catch(() => {});
+  try {
+    const base = { x, y, button: "left" as const, clickCount: 1, modifiers: 0 };
+    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { ...base, type: "mousePressed" });
+    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { ...base, type: "mouseReleased" });
+  } finally {
+    await chrome.debugger.detach(target).catch(() => {});
+  }
+}
+
+const KEY_CODE_MAP: Record<string, { keyCode: number; code: string }> = {
+  Enter: { keyCode: 13, code: "Enter" },
+  Tab: { keyCode: 9, code: "Tab" },
+  Escape: { keyCode: 27, code: "Escape" },
+  Backspace: { keyCode: 8, code: "Backspace" },
+  ArrowUp: { keyCode: 38, code: "ArrowUp" },
+  ArrowDown: { keyCode: 40, code: "ArrowDown" },
+  ArrowLeft: { keyCode: 37, code: "ArrowLeft" },
+  ArrowRight: { keyCode: 39, code: "ArrowRight" },
+};
+
+async function cdpKeyPress(tabId: number, key: string, modifiers: string[]): Promise<void> {
+  const target = { tabId };
+  const modifierBits = modifiers.reduce((acc, m) => {
+    if (m === "ctrl" || m === "control") return acc | 2;
+    if (m === "shift") return acc | 8;
+    if (m === "alt") return acc | 1;
+    if (m === "meta" || m === "cmd") return acc | 4;
+    return acc;
+  }, 0);
+  const extra = KEY_CODE_MAP[key] ?? { keyCode: key.charCodeAt(0), code: `Key${key.toUpperCase()}` };
+  await chrome.debugger.attach(target, "1.3").catch(() => {});
+  try {
+    const base = { key, ...extra, modifiers: modifierBits };
+    await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", { ...base, type: "keyDown" });
+    await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", { ...base, type: "keyUp" });
+  } finally {
+    await chrome.debugger.detach(target).catch(() => {});
+  }
+}
 
 async function navigateAndWait(
   tabId: number,

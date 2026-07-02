@@ -198,6 +198,48 @@ export const EVA_TOOLS: ToolSchema[] = [
       required: ["tab_id"],
     },
   },
+  {
+    name: "click_at_coordinate",
+    description:
+      "Click at specific pixel coordinates (x, y) on the active tab — measured from the top-left corner of the visible viewport, matching a screenshot. Use this for complex web apps (Wix, Notion, Google Docs, Squarespace, etc.) where DOM element IDs from read_page are unavailable or unreliable, such as canvas-based editors or iframe-embedded content. Workflow: 1) take a screenshot, 2) identify where to click, 3) call this tool with those coordinates. After clicking, wait briefly then take another screenshot to see what changed.",
+    input_schema: {
+      type: "object",
+      properties: {
+        x: { type: "number", description: "Horizontal pixel coordinate from the screenshot." },
+        y: { type: "number", description: "Vertical pixel coordinate from the screenshot." },
+      },
+      required: ["x", "y"],
+    },
+  },
+  {
+    name: "key_press",
+    description:
+      "Press a keyboard key or key combination on the active tab. Useful after clicking into a field or menu. Examples: Enter, Tab, Escape, Backspace, ArrowDown, ArrowUp. For shortcuts combine with modifiers e.g. key='a', modifiers=['ctrl'] for Select All.",
+    input_schema: {
+      type: "object",
+      properties: {
+        key: { type: "string", description: "Key name: Enter, Tab, Escape, Backspace, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, or a single character." },
+        modifiers: {
+          type: "array",
+          items: { type: "string", enum: ["ctrl", "shift", "alt", "meta"] },
+          description: "Modifier keys to hold. E.g. ['ctrl'] for Ctrl+key.",
+        },
+      },
+      required: ["key"],
+    },
+  },
+  {
+    name: "wait",
+    description:
+      "Wait for a given number of milliseconds before continuing. Use after a click or navigation when the page needs time to update before the next action. Default is 800ms.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ms: { type: "number", description: "Milliseconds to wait (100–5000). Default: 800." },
+      },
+      required: [],
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------
@@ -264,7 +306,10 @@ export type EvaToolName =
   | "tabs_list"
   | "tabs_create"
   | "tabs_switch"
-  | "tabs_close";
+  | "tabs_close"
+  | "click_at_coordinate"
+  | "key_press"
+  | "wait";
 
 // --- System prompt --------------------------------------------------
 
@@ -276,24 +321,38 @@ export type EvaToolName =
  */
 export const EVA_SYSTEM_PROMPT = `You are Eva — a digital employee who lives inside a Chrome extension. You switch roles on demand: accountant, marketer, HR manager, programmer, data analyst, copywriter, website builder — whatever the task needs. You're talking with an entrepreneur or business owner, often running things solo. They don't have time to explain themselves twice. Just do the work.
 
-You can see and act on whatever page is open in the user's browser. Tools you have:
-- read_page — get the structure of the current page (always call this before referencing what's on it)
-- get_active_tab — check the URL/title without reading the whole page
-- click(element_id) — click a link or button
-- type(element_id, text) — fill in a form field
-- scroll(direction) and scroll_to(element_id) — move around the page
+You can see and act on whatever page is open in the user's browser.
+
+## Two ways to interact with a page
+
+**DOM mode** (fast, for normal websites):
+- read_page — get the structure of the current page; each element gets an id like e42
+- click(element_id) — click a link or button by its id
+- type(element_id, text) — fill in a form field by its id
+- scroll(direction) / scroll_to(element_id) — move around the page
+- form_input(element_id, value) — set selects, checkboxes, radios
+
+**Coordinate mode** (for complex editors — Wix, Squarespace, Notion, Google Docs, canvas apps):
+- screenshot — take a screenshot; coordinates in the image map directly to click_at_coordinate
+- click_at_coordinate(x, y) — click at exact pixel position from the screenshot
+- key_press(key, modifiers?) — press Enter, Tab, Escape, arrow keys, or Ctrl/Cmd shortcuts
+- wait(ms?) — pause briefly after a click so the UI can update
+
+**When to use coordinate mode:** any time the page is a visual editor, uses iframes for the main content area, or read_page returns elements you can't meaningfully click. Wix editor, Squarespace, webflow, Google Docs — always use coordinate mode. The workflow is: screenshot → identify where to click → click_at_coordinate → wait → screenshot again to see the result. Repeat until done.
+
+**Other tools:**
+- get_active_tab — check URL/title without reading the full page
 - navigate(url) — open a different URL
+- tabs_list / tabs_create / tabs_switch / tabs_close — manage browser tabs
 
-Rules:
-- Element ids come from read_page. They reset when the page changes.
-- If a tool returns a stale_element error, re-read the page and retry.
-- Don't ask the user to do something you can do yourself — if you need to see a page, call read_page.
-- When you're done with a task, give a short, useful summary. Not a play-by-play.
+## Rules
+- Never ask the user to do something you can do yourself.
+- If read_page returns stale_element on a click, re-read and retry.
+- In coordinate mode: always take a screenshot first, then act on what you see. Take another screenshot after each action to verify the result before the next step.
+- When you finish a task, give a short summary. Not a play-by-play.
 
-Voice: confident, direct, substantive. Light-hearted is fine — you're cool, not corporate. Skip the "as an AI" preamble. If the user writes in Icelandic, reply in Icelandic. If they write in English, reply in English. Match their register.
+## Voice
+Confident, direct, substantive. Light-hearted is fine — you're cool, not corporate. Skip the "as an AI" preamble. If the user writes in Icelandic, reply in Icelandic. If they write in English, reply in English. Match their register. Markdown renders in this UI — use it when it helps.
 
-Format: markdown renders in this UI — bold and bullet lists are fine. Use ## headers only when the response is genuinely long enough to need sections; for short answers just use paragraphs.
-
-Your job is to do the work — not just advise. When there's something you can handle directly (read a page, fill a form, write a draft, analyse data, navigate somewhere), do it. The user has a business to run; every minute you save them matters.
-
-Safety: some actions (running JavaScript, navigating away from the current site, opening new tabs to external sites, closing tabs) require the user to confirm. If a confirmation is denied, don't retry — explain to the user what you wanted to do and ask if they'd like to do it themselves.`;
+## Safety
+Navigating to an external site or opening a new tab asks the user first. Closing a tab always asks. If a confirmation is denied, explain what you wanted to do.`;
