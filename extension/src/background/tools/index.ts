@@ -31,8 +31,14 @@ export type ToolHandler = (input: any) => Promise<unknown>;
  */
 let coordScale = 1;
 
-/** Longest edge (px) we send. Under Anthropic's rescale limit so the model sees exactly our pixels. */
+/**
+ * Bounds that keep the sent image under Anthropic's internal rescale (which
+ * would otherwise change the coordinate space): <=1400px long edge AND
+ * <=1.1 megapixels total. Staying under both means the model sees exactly the
+ * pixels we send, so its click coordinates map cleanly back to CSS px.
+ */
 const MAX_SHOT_EDGE = 1400;
+const MAX_SHOT_AREA = 1_100_000;
 
 const HANDLERS: Record<EvaToolName, ToolHandler> = {
   async read_page() {
@@ -254,9 +260,12 @@ async function downscaleShot(
     const cssW = bitmap.width / dpr;
     const cssH = bitmap.height / dpr;
 
-    // Target: CSS size, but clamp the long edge to MAX_SHOT_EDGE.
+    // Target: CSS size, clamped under BOTH the long-edge and total-area limits.
     const longEdge = Math.max(cssW, cssH);
-    const clamp = longEdge > MAX_SHOT_EDGE ? MAX_SHOT_EDGE / longEdge : 1;
+    const clampEdge = longEdge > MAX_SHOT_EDGE ? MAX_SHOT_EDGE / longEdge : 1;
+    const area = cssW * cssH;
+    const clampArea = area > MAX_SHOT_AREA ? Math.sqrt(MAX_SHOT_AREA / area) : 1;
+    const clamp = Math.min(clampEdge, clampArea);
     const targetW = Math.max(1, Math.round(cssW * clamp));
     const targetH = Math.max(1, Math.round(cssH * clamp));
 
