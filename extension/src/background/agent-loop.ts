@@ -24,10 +24,11 @@ import {
 import { getActiveTab } from "./page-bridge";
 
 // Big multi-step editor tasks (recolour a whole theme, wire up several pages)
-// legitimately need many rounds. 20 was cutting real work off mid-task; 40 is a
-// safety backstop against runaway loops, not a normal-task ceiling. If we hit
-// it, we tell the user so they can say "continue" (memory now carries progress).
-const MAX_TOOL_ROUNDS = 40;
+// legitimately need many rounds. This is a runaway-loop backstop that protects
+// the user's per-user token budget if Eva ever gets stuck — NOT a normal-task
+// ceiling. Hitting it is graceful: she tells the user and resumes on "haltu
+// áfram" (memory carries progress), so a generous value is low-risk.
+const MAX_TOOL_ROUNDS = 60;
 
 // ~400K chars ≈ 100K tokens — leaves headroom for system prompt, tools, and output.
 const MAX_HISTORY_CHARS = 400_000;
