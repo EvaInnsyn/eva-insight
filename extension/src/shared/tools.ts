@@ -212,6 +212,31 @@ export const EVA_TOOLS: ToolSchema[] = [
     },
   },
   {
+    name: "double_click_at_coordinate",
+    description:
+      "Double-click at specific pixel coordinates. Use when a single click selects an element but a double-click is needed to enter edit mode (common in Wix, Squarespace, and document editors).",
+    input_schema: {
+      type: "object",
+      properties: {
+        x: { type: "number", description: "Horizontal pixel coordinate from the screenshot." },
+        y: { type: "number", description: "Vertical pixel coordinate from the screenshot." },
+      },
+      required: ["x", "y"],
+    },
+  },
+  {
+    name: "type_at_cursor",
+    description:
+      "Insert text at the current cursor position — use this after click_at_coordinate or double_click_at_coordinate has focused a text field. Does not need a DOM element id; works inside iframes and complex editors.",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "The text to insert." },
+      },
+      required: ["text"],
+    },
+  },
+  {
     name: "key_press",
     description:
       "Press a keyboard key or key combination on the active tab. Useful after clicking into a field or menu. Examples: Enter, Tab, Escape, Backspace, ArrowDown, ArrowUp. For shortcuts combine with modifiers e.g. key='a', modifiers=['ctrl'] for Select All.",
@@ -308,6 +333,8 @@ export type EvaToolName =
   | "tabs_switch"
   | "tabs_close"
   | "click_at_coordinate"
+  | "double_click_at_coordinate"
+  | "type_at_cursor"
   | "key_press"
   | "wait";
 

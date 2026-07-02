@@ -162,8 +162,26 @@ const HANDLERS: Record<EvaToolName, ToolHandler> = {
     }
     const tab = await getActiveTab();
     if (tab.id === undefined) throw new Error("no active tab");
-    await cdpMouseClick(tab.id, Math.round(x), Math.round(y));
+    await cdpMouseClick(tab.id, Math.round(x), Math.round(y), 1);
     return { clicked: { x, y } };
+  },
+
+  async double_click_at_coordinate({ x, y }: { x: number; y: number }) {
+    if (typeof x !== "number" || typeof y !== "number") {
+      throw new Error("x and y must be numbers");
+    }
+    const tab = await getActiveTab();
+    if (tab.id === undefined) throw new Error("no active tab");
+    await cdpMouseClick(tab.id, Math.round(x), Math.round(y), 2);
+    return { double_clicked: { x, y } };
+  },
+
+  async type_at_cursor({ text }: { text: string }) {
+    if (typeof text !== "string" || !text) throw new Error("text must be a non-empty string");
+    const tab = await getActiveTab();
+    if (tab.id === undefined) throw new Error("no active tab");
+    await cdpInsertText(tab.id, text);
+    return { typed: text };
   },
 
   async key_press({ key, modifiers }: { key: string; modifiers?: string[] }) {
@@ -182,13 +200,27 @@ const HANDLERS: Record<EvaToolName, ToolHandler> = {
   },
 };
 
-async function cdpMouseClick(tabId: number, x: number, y: number): Promise<void> {
+async function cdpMouseClick(tabId: number, x: number, y: number, clickCount = 1): Promise<void> {
   const target = { tabId };
   await chrome.debugger.attach(target, "1.3").catch(() => {});
   try {
-    const base = { x, y, button: "left" as const, clickCount: 1, modifiers: 0 };
+    // Move first so hover states trigger correctly.
+    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+      type: "mouseMoved", x, y, button: "none", clickCount: 0, modifiers: 0,
+    });
+    const base = { x, y, button: "left" as const, clickCount, modifiers: 0 };
     await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { ...base, type: "mousePressed" });
     await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { ...base, type: "mouseReleased" });
+  } finally {
+    await chrome.debugger.detach(target).catch(() => {});
+  }
+}
+
+async function cdpInsertText(tabId: number, text: string): Promise<void> {
+  const target = { tabId };
+  await chrome.debugger.attach(target, "1.3").catch(() => {});
+  try {
+    await chrome.debugger.sendCommand(target, "Input.insertText", { text });
   } finally {
     await chrome.debugger.detach(target).catch(() => {});
   }
