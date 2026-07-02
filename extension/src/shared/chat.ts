@@ -65,14 +65,125 @@ export interface ProxyMessage {
   content: string | unknown[];
 }
 
+/**
+ * Rebuild the Anthropic-shaped message list from the UI history.
+ *
+ * CRITICAL: this must preserve tool_use / tool_result blocks so Eva remembers
+ * what she did on the page across user turns. Sending text-only history (the
+ * old behaviour) gave her amnesia — every new message, she'd forget every
+ * screenshot and click from before and start over. Silent working turns (tool
+ * calls, no text) must also be kept, or the history loses whole actions.
+ */
 export function toProxyMessages(history: ChatMessage[]): ProxyMessage[] {
-  return history
-    .filter((m) => m.role === "user" || m.role === "assistant")
-    .filter((m) => m.text.trim().length > 0 && !m.error)
-    .map(
-      (m) =>
-        ({ role: m.role as "user" | "assistant", content: m.text }) as ProxyMessage,
-    );
+  const raw: ProxyMessage[] = [];
+
+  for (const m of history) {
+    if (m.role !== "user" && m.role !== "assistant") continue;
+    if (m.error) continue;
+
+    if (m.role === "user") {
+      if (m.text.trim().length === 0) continue;
+      raw.push({ role: "user", content: m.text });
+      continue;
+    }
+
+    // assistant
+    const calls = m.toolCalls ?? [];
+    if (calls.length === 0) {
+      if (m.text.trim().length === 0) continue;
+      raw.push({ role: "assistant", content: m.text });
+      continue;
+    }
+
+    // Assistant turn that used tools → an assistant turn carrying the tool_use
+    // blocks, followed by a user turn carrying the matching tool_result blocks.
+    const assistantBlocks: unknown[] = [];
+    if (m.text.trim().length > 0) {
+      assistantBlocks.push({ type: "text", text: m.text });
+    }
+    for (const c of calls) {
+      assistantBlocks.push({
+        type: "tool_use",
+        id: c.id,
+        name: c.name,
+        input: c.input ?? {},
+      });
+    }
+    raw.push({ role: "assistant", content: assistantBlocks });
+
+    const resultBlocks = calls.map((c) => ({
+      type: "tool_result",
+      tool_use_id: c.id,
+      content: toolResultContent(c.output, c.isError === true),
+      ...(c.isError ? { is_error: true } : {}),
+    }));
+    raw.push({ role: "user", content: resultBlocks });
+  }
+
+  return mergeAdjacentRoles(raw);
+}
+
+/**
+ * Turn a stored tool output string back into Anthropic content. Screenshots are
+ * stored as JSON with base64 — they must go back as image blocks so Eva can see
+ * them, not as text she'd try to read literally.
+ */
+function toolResultContent(output: string | undefined, isError: boolean): unknown {
+  if (output == null) return "(no result recorded)";
+  if (isError) return output;
+  try {
+    const parsed = JSON.parse(output) as {
+      mime_type?: string;
+      base64?: string;
+      url?: string;
+      title?: string;
+    };
+    if (
+      typeof parsed.mime_type === "string" &&
+      parsed.mime_type.startsWith("image/") &&
+      typeof parsed.base64 === "string"
+    ) {
+      const blocks: unknown[] = [
+        {
+          type: "image",
+          source: { type: "base64", media_type: parsed.mime_type, data: parsed.base64 },
+        },
+      ];
+      const label = [parsed.title, parsed.url].filter(Boolean).join(" · ");
+      if (label) blocks.push({ type: "text", text: label });
+      return blocks;
+    }
+  } catch {
+    // not JSON — return as-is
+  }
+  return output;
+}
+
+/**
+ * Anthropic requires strict user/assistant alternation. Reconstructing tool
+ * turns can leave two user turns adjacent (a tool_result turn immediately
+ * followed by the next typed user message). Fold consecutive same-role turns
+ * into one, converting string content into a text block as needed.
+ */
+function mergeAdjacentRoles(messages: ProxyMessage[]): ProxyMessage[] {
+  const out: ProxyMessage[] = [];
+  for (const m of messages) {
+    const prev = out[out.length - 1];
+    if (prev && prev.role === m.role) {
+      const prevBlocks = asBlocks(prev.content);
+      const nextBlocks = asBlocks(m.content);
+      prev.content = [...prevBlocks, ...nextBlocks];
+    } else {
+      out.push({ ...m });
+    }
+  }
+  return out;
+}
+
+function asBlocks(content: string | unknown[]): unknown[] {
+  if (Array.isArray(content)) return content;
+  const text = String(content ?? "");
+  return text.length > 0 ? [{ type: "text", text }] : [];
 }
 
 export function newId(prefix = "m"): string {

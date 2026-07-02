@@ -536,6 +536,69 @@ textarea {
   font-size: 11px;
 }
 
+.eva-tool-icon {
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+/* Collapsed activity headline (shown once a turn's actions are done). */
+.eva-activity {
+  margin-bottom: 8px;
+}
+
+.eva-activity-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid var(--eva-frame-dim);
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--eva-text-dim);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+}
+
+.eva-activity-head:hover {
+  background: var(--eva-bg-dim);
+}
+
+.eva-activity-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--eva-frame);
+  color: var(--eva-text-on-red);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.eva-activity-badge.err {
+  background: var(--eva-bg);
+  color: var(--eva-frame);
+  box-shadow: inset 0 0 0 1.5px var(--eva-frame);
+}
+
+.eva-activity-label {
+  flex: 1 1 auto;
+  font-weight: 500;
+}
+
+.eva-activity .eva-tools {
+  margin-top: 6px;
+  margin-bottom: 0;
+}
+
 .eva-tool-body {
   padding: 8px 10px 10px;
   border-top: 1px dashed var(--eva-frame-dim);

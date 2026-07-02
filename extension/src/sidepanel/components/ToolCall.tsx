@@ -26,6 +26,7 @@ export function ToolCall({ call }: Props) {
         aria-expanded={open}
       >
         <span className={`eva-tool-status ${statusClass}`} />
+        <span className="eva-tool-icon" aria-hidden>{iconFor(call.name)}</span>
         <span className="eva-tool-name">{label}</span>
         {summary ? <span className="eva-tool-summary">{summary}</span> : null}
         <span className="eva-tool-caret">{open ? "▾" : "▸"}</span>
@@ -56,14 +57,49 @@ export function ToolCall({ call }: Props) {
 
 function labelFor(name: string): string {
   switch (name) {
-    case "read_page": return "Read page";
-    case "get_active_tab": return "Get active tab";
-    case "click": return "Click";
-    case "type": return "Type";
-    case "scroll": return "Scroll";
-    case "scroll_to": return "Scroll to";
-    case "navigate": return "Navigate";
+    case "read_page": return "Reading page";
+    case "get_active_tab": return "Checking tab";
+    case "click": return "Clicking";
+    case "click_at_coordinate": return "Clicking";
+    case "double_click_at_coordinate": return "Double-clicking";
+    case "type": return "Typing";
+    case "type_at_cursor": return "Typing";
+    case "key_press": return "Pressing key";
+    case "scroll": return "Scrolling";
+    case "scroll_to": return "Scrolling";
+    case "navigate": return "Opening page";
+    case "screenshot": return "Looking at screen";
+    case "wait": return "Waiting";
+    case "form_input": return "Setting field";
+    case "tabs_list": return "Listing tabs";
+    case "tabs_create": return "New tab";
+    case "tabs_switch": return "Switching tab";
+    case "tabs_close": return "Closing tab";
     default: return name;
+  }
+}
+
+function iconFor(name: string): string {
+  switch (name) {
+    case "read_page": return "📄";
+    case "get_active_tab":
+    case "tabs_list":
+    case "tabs_switch": return "🗂";
+    case "click":
+    case "click_at_coordinate":
+    case "double_click_at_coordinate": return "👆";
+    case "type":
+    case "type_at_cursor":
+    case "form_input": return "⌨️";
+    case "key_press": return "⏎";
+    case "scroll":
+    case "scroll_to": return "↕️";
+    case "navigate":
+    case "tabs_create": return "🌐";
+    case "screenshot": return "👁";
+    case "wait": return "⏳";
+    case "tabs_close": return "✕";
+    default: return "•";
   }
 }
 
@@ -74,15 +110,28 @@ function summaryFor(call: ChatToolCall): string | null {
     case "click":
     case "scroll_to":
       return typeof input.element_id === "string" ? input.element_id : null;
+    case "click_at_coordinate":
+    case "double_click_at_coordinate":
+      return typeof input.x === "number" && typeof input.y === "number"
+        ? `${Math.round(input.x)}, ${Math.round(input.y)}`
+        : null;
     case "type":
+    case "type_at_cursor":
       if (typeof input.text !== "string") return null;
       return input.text.length > 32
         ? `"${input.text.slice(0, 31)}…"`
         : `"${input.text}"`;
+    case "key_press":
+      return typeof input.key === "string" ? input.key : null;
     case "scroll":
       return typeof input.direction === "string" ? input.direction : null;
     case "navigate":
+    case "tabs_create":
       return typeof input.url === "string" ? trimUrl(input.url) : null;
+    case "form_input":
+      return typeof input.value === "string" ? input.value : null;
+    case "wait":
+      return typeof input.ms === "number" ? `${input.ms}ms` : null;
     default:
       return null;
   }

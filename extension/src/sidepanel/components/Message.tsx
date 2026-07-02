@@ -1,5 +1,6 @@
+import { useState } from "react";
 import ReactMarkdown from "react-markdown";
-import type { ChatMessage } from "@/shared/chat";
+import type { ChatMessage, ChatToolCall } from "@/shared/chat";
 import { ToolCall } from "./ToolCall";
 import { ThinkingEye } from "./ThinkingEye";
 
@@ -17,13 +18,7 @@ export function Message({ message }: { message: ChatMessage }) {
     <div className={cls}>
       <div className="eva-msg-bubble">
         {hasCalls ? (
-          <div className="eva-tools">
-            {calls.map((c) => (
-              <ToolCall key={c.id} call={c} />
-            ))}
-            {/* Eye shows while still streaming after tool calls */}
-            {message.streaming ? <ThinkingEye /> : null}
-          </div>
+          <ActivityGroup calls={calls} streaming={message.streaming === true} />
         ) : null}
         {hasText ? (
           <div className="eva-msg-text">
@@ -37,6 +32,63 @@ export function Message({ message }: { message: ChatMessage }) {
         ) : null}
         {message.error ? <ErrorBlock raw={message.error} /> : null}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Eva's actions, presented like Claude's extension: while she's working the
+ * steps stream in live; once she's done they fold into one clean headline
+ * ("✓ 6 aðgerðir") you can expand to inspect. Keeps the transcript calm
+ * instead of a wall of tool cards + narration.
+ */
+function ActivityGroup({
+  calls,
+  streaming,
+}: {
+  calls: ChatToolCall[];
+  streaming: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const done = calls.filter((c) => c.finishedAt).length;
+  const anyError = calls.some((c) => c.isError);
+
+  // While streaming, always show the live steps so the user sees progress.
+  if (streaming) {
+    return (
+      <div className="eva-tools">
+        {calls.map((c) => (
+          <ToolCall key={c.id} call={c} />
+        ))}
+        <ThinkingEye />
+      </div>
+    );
+  }
+
+  // Finished: one headline, expandable.
+  return (
+    <div className="eva-activity">
+      <button
+        type="button"
+        className="eva-activity-head"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <span className={anyError ? "eva-activity-badge err" : "eva-activity-badge"}>
+          {anyError ? "!" : "✓"}
+        </span>
+        <span className="eva-activity-label">
+          {done} {done === 1 ? "aðgerð" : "aðgerðir"}
+        </span>
+        <span className="eva-tool-caret">{open ? "▾" : "▸"}</span>
+      </button>
+      {open ? (
+        <div className="eva-tools">
+          {calls.map((c) => (
+            <ToolCall key={c.id} call={c} />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
