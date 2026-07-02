@@ -110,13 +110,49 @@ function stripOldScreenshots(messages: ProxyMessage[]): ProxyMessage[] {
 }
 
 /**
+ * Approximate the *context-relevant* size of the history, EXCLUDING base64
+ * image data. A single screenshot is ~1MB of base64 — if we counted that
+ * toward MAX_HISTORY_CHARS, the limit would blow the moment any screenshot
+ * existed, forcing pruneMessages to drop the whole conversation (including
+ * the original task) and leaving Eva with "your message came through empty".
+ * Images are already bounded to one by stripOldScreenshots, so they must NOT
+ * drive conversation pruning. We count each image as a small fixed cost.
+ */
+function measuredSize(messages: ProxyMessage[]): number {
+  const IMAGE_COST = 2_000;
+  let total = 0;
+  for (const m of messages) {
+    if (typeof m.content === "string") {
+      total += m.content.length;
+      continue;
+    }
+    if (!Array.isArray(m.content)) {
+      total += JSON.stringify(m.content ?? "").length;
+      continue;
+    }
+    for (const block of m.content as any[]) {
+      if (block?.type === "image") {
+        total += IMAGE_COST;
+      } else if (block?.type === "tool_result" && Array.isArray(block.content)) {
+        for (const c of block.content as any[]) {
+          total += c?.type === "image" ? IMAGE_COST : JSON.stringify(c ?? "").length;
+        }
+      } else {
+        total += JSON.stringify(block ?? "").length;
+      }
+    }
+  }
+  return total;
+}
+
+/**
  * Trims old messages when the conversation grows too large.
  * Always cuts at a "clean" user turn (string content = real question)
  * so tool_use/tool_result pairs are never split.
  */
 function pruneMessages(messages: ProxyMessage[]): ProxyMessage[] {
   const stripped = stripOldScreenshots(messages);
-  if (JSON.stringify(stripped).length <= MAX_HISTORY_CHARS) return stripped;
+  if (measuredSize(stripped) <= MAX_HISTORY_CHARS) return stripped;
 
   // Find indices where a real user question starts (string content, not tool results).
   const cleanStarts = stripped
@@ -126,7 +162,7 @@ function pruneMessages(messages: ProxyMessage[]): ProxyMessage[] {
   // Walk from most-recent clean start backwards until the slice fits.
   for (let j = cleanStarts.length - 1; j >= 0; j--) {
     const slice = stripped.slice(cleanStarts[j].i);
-    if (JSON.stringify(slice).length <= MAX_HISTORY_CHARS) return slice;
+    if (measuredSize(slice) <= MAX_HISTORY_CHARS) return slice;
   }
 
   // Last resort: just the final 2 messages.

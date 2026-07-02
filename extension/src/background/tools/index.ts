@@ -21,6 +21,19 @@ import type { EvaToolName } from "../../shared/tools";
 
 export type ToolHandler = (input: any) => Promise<unknown>;
 
+/**
+ * Coordinate-space bridge between the screenshot the model sees and the CSS
+ * pixels CDP needs. On a retina display captureVisibleTab returns a 2x image;
+ * CDP Input events use CSS pixels. We downscale the screenshot to CSS-pixel
+ * dimensions (kept under Anthropic's ~1568px rescale threshold) so the model's
+ * reported coordinates map 1:1 to the pixels we click. `coordScale` is CSS px
+ * per image px — updated on every screenshot, applied on every click.
+ */
+let coordScale = 1;
+
+/** Longest edge (px) we send. Under Anthropic's rescale limit so the model sees exactly our pixels. */
+const MAX_SHOT_EDGE = 1400;
+
 const HANDLERS: Record<EvaToolName, ToolHandler> = {
   async read_page() {
     const snapshot = await readActivePage();
@@ -95,15 +108,34 @@ const HANDLERS: Record<EvaToolName, ToolHandler> = {
   async screenshot() {
     const tab = await getActiveTab();
     if (tab.windowId === undefined) throw new Error("no active window");
+    if (tab.id === undefined) throw new Error("no active tab");
+
+    // JPEG at q70 is ~5x smaller than PNG and still crisp enough to read UI.
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-      format: "png",
+      format: "jpeg",
+      quality: 70,
     });
+
+    // How many CSS px does the captured (device-px) image represent? On retina
+    // dpr=2, so a 2560px-wide capture is a 1280px CSS viewport. We need that to
+    // map the model's click coordinates back to CSS px for CDP.
+    let dpr = 1;
+    try {
+      const [res] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => window.devicePixelRatio || 1,
+      });
+      if (typeof res?.result === "number" && res.result > 0) dpr = res.result;
+    } catch {
+      // restricted page — assume 1x
+    }
+
+    const { base64, scale } = await downscaleShot(dataUrl, dpr);
+    coordScale = scale;
+    if (!base64) throw new Error("screenshot capture returned no image data");
     return {
-      mime_type: "image/png",
-      // Strip the data URL prefix for clean base64 the model can ingest.
-      // Keep the size small in the JSON.stringify by truncating display
-      // — full bytes are still in the field for Phase 7 vision use.
-      base64: dataUrl.replace(/^data:image\/png;base64,/, ""),
+      mime_type: "image/jpeg",
+      base64,
       url: tab.url,
       title: tab.title,
     };
@@ -162,7 +194,9 @@ const HANDLERS: Record<EvaToolName, ToolHandler> = {
     }
     const tab = await getActiveTab();
     if (tab.id === undefined) throw new Error("no active tab");
-    await cdpMouseClick(tab.id, Math.round(x), Math.round(y), 1);
+    const cx = Math.round(x * coordScale);
+    const cy = Math.round(y * coordScale);
+    await cdpMouseClick(tab.id, cx, cy, 1);
     return { clicked: { x, y } };
   },
 
@@ -172,7 +206,9 @@ const HANDLERS: Record<EvaToolName, ToolHandler> = {
     }
     const tab = await getActiveTab();
     if (tab.id === undefined) throw new Error("no active tab");
-    await cdpMouseClick(tab.id, Math.round(x), Math.round(y), 2);
+    const cx = Math.round(x * coordScale);
+    const cy = Math.round(y * coordScale);
+    await cdpMouseClick(tab.id, cx, cy, 2);
     return { double_clicked: { x, y } };
   },
 
@@ -199,6 +235,53 @@ const HANDLERS: Record<EvaToolName, ToolHandler> = {
     return { waited_ms: delay };
   },
 };
+
+/**
+ * Downscale a captured (device-pixel) screenshot so the image the model sees
+ * is in CSS pixels and stays under Anthropic's rescale threshold. Returns the
+ * base64 JPEG plus `scale` = CSS px per image px, used to map click coords.
+ */
+async function downscaleShot(
+  dataUrl: string,
+  dpr: number,
+): Promise<{ base64: string; scale: number }> {
+  const stripPrefix = (u: string) => u.replace(/^data:image\/[a-z]+;base64,/, "");
+  try {
+    const blob = await (await fetch(dataUrl)).blob();
+    const bitmap = await createImageBitmap(blob);
+
+    // CSS dimensions of the captured area.
+    const cssW = bitmap.width / dpr;
+    const cssH = bitmap.height / dpr;
+
+    // Target: CSS size, but clamp the long edge to MAX_SHOT_EDGE.
+    const longEdge = Math.max(cssW, cssH);
+    const clamp = longEdge > MAX_SHOT_EDGE ? MAX_SHOT_EDGE / longEdge : 1;
+    const targetW = Math.max(1, Math.round(cssW * clamp));
+    const targetH = Math.max(1, Math.round(cssH * clamp));
+
+    const canvas = new OffscreenCanvas(targetW, targetH);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return { base64: stripPrefix(dataUrl), scale: 1 };
+    ctx.drawImage(bitmap, 0, 0, targetW, targetH);
+    bitmap.close();
+
+    const outBlob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.7 });
+    const buf = await outBlob.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+    }
+    // image px → CSS px factor: one image px covers (cssW/targetW) CSS px.
+    const scale = cssW / targetW;
+    return { base64: btoa(binary), scale };
+  } catch {
+    // Fallback: send as-is, best-effort scale from dpr.
+    return { base64: stripPrefix(dataUrl), scale: dpr > 0 ? 1 / dpr : 1 };
+  }
+}
 
 async function cdpMouseClick(tabId: number, x: number, y: number, clickCount = 1): Promise<void> {
   const target = { tabId };
