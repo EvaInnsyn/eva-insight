@@ -28,6 +28,7 @@ export interface ToolUseBlock {
 export interface ThinkingBlock {
   type: "thinking";
   thinking: string;
+  signature: string;
 }
 
 export interface RunChatArgs {
@@ -71,6 +72,7 @@ interface BlockState {
   toolUseName?: string;
   toolUseJsonBuf?: string;
   thinkingBuf?: string;
+  signatureBuf?: string;
 }
 
 export async function runChat(args: RunChatArgs): Promise<RunChatResult> {
@@ -170,6 +172,8 @@ export async function runChat(args: RunChatArgs): Promise<RunChatResult> {
             (block.toolUseJsonBuf ?? "") + String(delta.partial_json ?? "");
         } else if (delta?.type === "thinking_delta" && block.type === "thinking") {
           block.thinkingBuf = (block.thinkingBuf ?? "") + String(delta.thinking ?? "");
+        } else if (delta?.type === "signature_delta" && block.type === "thinking") {
+          block.signatureBuf = (block.signatureBuf ?? "") + String(delta.signature ?? "");
         }
         break;
       }
@@ -188,7 +192,11 @@ export async function runChat(args: RunChatArgs): Promise<RunChatResult> {
           }
           toolUses.push({ id: block.toolUseId!, name: block.toolUseName!, input });
         } else if (block?.type === "thinking" && (block.thinkingBuf ?? "").length > 0) {
-          thinkingBlocks.push({ type: "thinking", thinking: block.thinkingBuf! });
+          thinkingBlocks.push({
+            type: "thinking",
+            thinking: block.thinkingBuf!,
+            signature: block.signatureBuf ?? "",
+          });
         }
         break;
       }

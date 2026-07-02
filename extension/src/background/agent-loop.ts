@@ -159,7 +159,7 @@ export async function runAgentLoop(
     // Assistant turn: thinking blocks must precede text + tool_use (API requirement).
     const assistantBlocks: unknown[] = [];
     for (const tb of result.thinkingBlocks) {
-      assistantBlocks.push({ type: "thinking", thinking: tb.thinking });
+      assistantBlocks.push({ type: "thinking", thinking: tb.thinking, signature: tb.signature });
     }
     if (result.text.length > 0) {
       assistantBlocks.push({ type: "text", text: result.text });
