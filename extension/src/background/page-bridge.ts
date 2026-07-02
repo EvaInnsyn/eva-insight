@@ -67,18 +67,48 @@ export async function getActiveTab(): Promise<chrome.tabs.Tab> {
   return tab;
 }
 
+/**
+ * Inject the main content script into a tab on demand. Needed when the tab was
+ * already open before the extension loaded (or was just updated) — the declared
+ * content script only auto-injects into pages that load *after* install, so
+ * pre-existing tabs have no receiver. Rather than ask the user to reload the
+ * page, we inject it ourselves and carry on.
+ */
+async function ensureContentScript(tabId: number): Promise<boolean> {
+  const scripts = chrome.runtime.getManifest().content_scripts ?? [];
+  const files: string[] = [];
+  for (const cs of scripts) {
+    if (cs.matches?.includes("<all_urls>") && cs.js) files.push(...cs.js);
+  }
+  if (files.length === 0) return false;
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files });
+    return true;
+  } catch {
+    // Protected page or injection blocked — nothing we can do.
+    return false;
+  }
+}
+
 export async function send<T = unknown>(
   tabId: number,
   request: PageRequest,
 ): Promise<T> {
-  let raw: PageResponse<T>;
+  let raw: PageResponse<T> | undefined;
   try {
     raw = (await chrome.tabs.sendMessage(tabId, request)) as PageResponse<T>;
-  } catch (err) {
-    // Common case: "Could not establish connection. Receiving end does not exist."
-    // means the content script isn't loaded on this page (e.g. user just opened
-    // a fresh chrome:// or chrome-extension:// tab).
-    throw new ContentScriptUnavailableError();
+  } catch {
+    // "Could not establish connection" — content script isn't loaded on this
+    // tab yet. Inject it ourselves and retry once, so the user never has to
+    // manually reload the page.
+    const injected = await ensureContentScript(tabId);
+    if (!injected) throw new ContentScriptUnavailableError();
+    await new Promise((r) => setTimeout(r, 200));
+    try {
+      raw = (await chrome.tabs.sendMessage(tabId, request)) as PageResponse<T>;
+    } catch {
+      throw new ContentScriptUnavailableError();
+    }
   }
   if (!raw) throw new ContentScriptUnavailableError();
   if (!raw.ok) {
