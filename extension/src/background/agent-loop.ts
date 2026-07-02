@@ -68,26 +68,69 @@ function buildToolResultContent(output: string, isError: boolean): unknown {
 }
 
 /**
+ * Replace base64 image data in older tool results with a short placeholder.
+ * Screenshots are 400-800KB each — keeping them all blows the context window
+ * and causes pruneMessages to cut the original user question. We only need
+ * the most recent screenshot for visual context; older ones can be summarised.
+ */
+function stripOldScreenshots(messages: ProxyMessage[]): ProxyMessage[] {
+  // Find indices of tool-result turns that contain an image block.
+  const imageIndices: number[] = [];
+  messages.forEach((m, i) => {
+    if (m.role === "user" && Array.isArray(m.content)) {
+      const blocks = m.content as unknown[];
+      if (blocks.some((b: any) => b?.type === "tool_result" &&
+        (Array.isArray(b?.content)
+          ? b.content.some((c: any) => c?.type === "image")
+          : false))) {
+        imageIndices.push(i);
+      }
+    }
+  });
+
+  // Keep the last screenshot intact; strip all earlier ones.
+  if (imageIndices.length <= 1) return messages;
+  const toStrip = new Set(imageIndices.slice(0, -1));
+
+  return messages.map((m, i) => {
+    if (!toStrip.has(i)) return m;
+    const blocks = (m.content as unknown[]).map((b: any) => {
+      if (b?.type !== "tool_result" || !Array.isArray(b?.content)) return b;
+      return {
+        ...b,
+        content: b.content.map((c: any) =>
+          c?.type === "image"
+            ? { type: "text", text: "[screenshot — removed to save context]" }
+            : c
+        ),
+      };
+    });
+    return { ...m, content: blocks };
+  });
+}
+
+/**
  * Trims old messages when the conversation grows too large.
  * Always cuts at a "clean" user turn (string content = real question)
  * so tool_use/tool_result pairs are never split.
  */
 function pruneMessages(messages: ProxyMessage[]): ProxyMessage[] {
-  if (JSON.stringify(messages).length <= MAX_HISTORY_CHARS) return messages;
+  const stripped = stripOldScreenshots(messages);
+  if (JSON.stringify(stripped).length <= MAX_HISTORY_CHARS) return stripped;
 
   // Find indices where a real user question starts (string content, not tool results).
-  const cleanStarts = messages
+  const cleanStarts = stripped
     .map((m, i) => ({ m, i }))
     .filter(({ m }) => m.role === "user" && typeof m.content === "string");
 
   // Walk from most-recent clean start backwards until the slice fits.
   for (let j = cleanStarts.length - 1; j >= 0; j--) {
-    const slice = messages.slice(cleanStarts[j].i);
+    const slice = stripped.slice(cleanStarts[j].i);
     if (JSON.stringify(slice).length <= MAX_HISTORY_CHARS) return slice;
   }
 
   // Last resort: just the final 2 messages.
-  return messages.slice(-2);
+  return stripped.slice(-2);
 }
 
 export interface AgentCallbacks {
