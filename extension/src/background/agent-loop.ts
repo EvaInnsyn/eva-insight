@@ -23,7 +23,11 @@ import {
 } from "../shared/tools";
 import { getActiveTab } from "./page-bridge";
 
-const MAX_TOOL_ROUNDS = 20;
+// Big multi-step editor tasks (recolour a whole theme, wire up several pages)
+// legitimately need many rounds. 20 was cutting real work off mid-task; 40 is a
+// safety backstop against runaway loops, not a normal-task ceiling. If we hit
+// it, we tell the user so they can say "continue" (memory now carries progress).
+const MAX_TOOL_ROUNDS = 40;
 
 // ~400K chars ≈ 100K tokens — leaves headroom for system prompt, tools, and output.
 const MAX_HISTORY_CHARS = 400_000;
@@ -210,6 +214,7 @@ export async function runAgentLoop(
   let allowedDomains = [...(settings.allowedDomains ?? [])];
 
   let lastInfo: ChatStopInfo = { stop_reason: null };
+  let endedTurn = false;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (signal.aborted) break;
@@ -232,6 +237,7 @@ export async function runAgentLoop(
       if (result.text.length > 0) {
         messages.push({ role: "assistant", content: result.text });
       }
+      endedTurn = true;
       break;
     }
 
@@ -309,6 +315,16 @@ export async function runAgentLoop(
       });
     }
     messages.push({ role: "user", content: toolResultBlocks });
+  }
+
+  // Hit the round cap with work still in flight (never reached end_turn).
+  // Tell the user instead of stopping silently — thanks to cross-turn memory,
+  // "haltu áfram" ("continue") will pick up exactly where Eva left off.
+  if (!endedTurn && !signal.aborted) {
+    const note =
+      "\n\n_Ég hef tekið mörg skref í einu og geri hlé hér. Verkinu er kannski ekki alveg lokið — skrifaðu **haltu áfram** og ég held áfram þaðan sem frá var horfið._";
+    callbacks.onTextDelta(note);
+    messages.push({ role: "assistant", content: note.trim() });
   }
 
   return { info: lastInfo, messages };
