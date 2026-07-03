@@ -73,44 +73,53 @@ function buildToolResultContent(output: string, isError: boolean): unknown {
 }
 
 /**
- * Replace base64 image data in older tool results with a short placeholder.
- * Screenshots are 400-800KB each — keeping them all blows the context window
- * and causes pruneMessages to cut the original user question. We only need
- * the most recent screenshot for visual context; older ones can be summarised.
+ * Replace all but the newest few screenshot images with short placeholders.
+ *
+ * Must operate at the IMAGE level, not the message level: a long agentic turn
+ * stores ALL its tool results (30+ screenshots) inside ONE user message, so
+ * "keep the last message with images" keeps every one of them. Replaying
+ * dozens of images trips Anthropic's many-image limits ("image dimensions
+ * exceed max allowed size for many-image requests: 2000 pixels") and bloats
+ * the payload. Keeping the last 2 images preserves visual continuity while
+ * guaranteeing every request stays a small-image-count request.
  */
+const KEEP_LAST_IMAGES = 2;
+
 function stripOldScreenshots(messages: ProxyMessage[]): ProxyMessage[] {
-  // Find indices of tool-result turns that contain an image block.
-  const imageIndices: number[] = [];
-  messages.forEach((m, i) => {
-    if (m.role === "user" && Array.isArray(m.content)) {
-      const blocks = m.content as unknown[];
-      if (blocks.some((b: any) => b?.type === "tool_result" &&
-        (Array.isArray(b?.content)
-          ? b.content.some((c: any) => c?.type === "image")
-          : false))) {
-        imageIndices.push(i);
-      }
-    }
+  // Collect the position of every image block inside tool_result content.
+  const positions: { msg: number; block: number; item: number }[] = [];
+  messages.forEach((m, mi) => {
+    if (m.role !== "user" || !Array.isArray(m.content)) return;
+    (m.content as any[]).forEach((b, bi) => {
+      if (b?.type !== "tool_result" || !Array.isArray(b.content)) return;
+      (b.content as any[]).forEach((c, ci) => {
+        if (c?.type === "image") positions.push({ msg: mi, block: bi, item: ci });
+      });
+    });
   });
 
-  // Keep the last screenshot intact; strip all earlier ones.
-  if (imageIndices.length <= 1) return messages;
-  const toStrip = new Set(imageIndices.slice(0, -1));
+  if (positions.length <= KEEP_LAST_IMAGES) return messages;
+  const drop = new Set(
+    positions
+      .slice(0, positions.length - KEEP_LAST_IMAGES)
+      .map((p) => `${p.msg}:${p.block}:${p.item}`),
+  );
 
-  return messages.map((m, i) => {
-    if (!toStrip.has(i)) return m;
-    const blocks = (m.content as unknown[]).map((b: any) => {
-      if (b?.type !== "tool_result" || !Array.isArray(b?.content)) return b;
-      return {
-        ...b,
-        content: b.content.map((c: any) =>
-          c?.type === "image"
-            ? { type: "text", text: "[screenshot — removed to save context]" }
-            : c
-        ),
-      };
+  return messages.map((m, mi) => {
+    if (m.role !== "user" || !Array.isArray(m.content)) return m;
+    let changed = false;
+    const blocks = (m.content as any[]).map((b, bi) => {
+      if (b?.type !== "tool_result" || !Array.isArray(b.content)) return b;
+      const inner = (b.content as any[]).map((c, ci) => {
+        if (c?.type === "image" && drop.has(`${mi}:${bi}:${ci}`)) {
+          changed = true;
+          return { type: "text", text: "[screenshot — removed to save context]" };
+        }
+        return c;
+      });
+      return { ...b, content: inner };
     });
-    return { ...m, content: blocks };
+    return changed ? { ...m, content: blocks } : m;
   });
 }
 
