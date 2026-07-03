@@ -15,6 +15,12 @@ export interface SessionPayload {
   actions: SessionAction[];
   startedAt?: string;
   endedAt?: string;
+  /**
+   * Short overview for Lotur: what was needed and what got done. Built locally
+   * from text we already have (no AI call) — the platform stores it directly
+   * and skips its paid AI summary.
+   */
+  summary?: string;
 }
 
 export type PushResult =
@@ -49,6 +55,7 @@ export async function pushSession(
         })),
         started_at: payload.startedAt,
         ended_at: payload.endedAt,
+        summary: payload.summary ? payload.summary.slice(0, 2000) : undefined,
       }),
     });
 
@@ -103,6 +110,17 @@ export function describeAction(
     case "tabs_switch":
     case "tabs_close":
       return typeof i.tab_id === "number" ? `tab ${i.tab_id}` : undefined;
+    case "click_at_coordinate":
+    case "double_click_at_coordinate":
+      return typeof i.x === "number" && typeof i.y === "number"
+        ? `(${Math.round(i.x)}, ${Math.round(i.y)})`
+        : undefined;
+    case "type_at_cursor":
+      return clip(`"${str(i.text) ?? ""}"`);
+    case "key_press":
+      return str(i.key);
+    case "wait":
+      return typeof i.ms === "number" ? `${i.ms}ms` : undefined;
     default:
       return undefined;
   }

@@ -189,7 +189,7 @@ async function startStream(
   const sessionStartedAt = new Date().toISOString();
 
   try {
-    const { info, paused } = await runAgentLoop({
+    const { info, paused, messages: finalMessages } = await runAgentLoop({
       settings,
       accessToken,
       initialMessages: messages,
@@ -273,7 +273,12 @@ async function startStream(
     });
     // Fire-and-forget: save this session's actions to the Eva Innsýn platform
     // (no-op if the user hasn't connected their account).
-    void maybePushSession(messages, sessionActions, sessionStartedAt);
+    void maybePushSession(
+      messages,
+      sessionActions,
+      sessionStartedAt,
+      buildSessionSummary(finalMessages, paused, sessionActions.length),
+    );
   } catch (err) {
     if (controller.signal.aborted) {
       safePost(port, {
@@ -443,6 +448,7 @@ async function maybePushSession(
   messages: ProxyMessage[],
   actions: SessionAction[],
   startedAt: string,
+  summary?: string,
 ): Promise<void> {
   if (actions.length === 0) return;
   try {
@@ -451,6 +457,7 @@ async function maybePushSession(
       actions,
       startedAt,
       endedAt: new Date().toISOString(),
+      summary,
     });
     if (result.ok) {
       console.log(
@@ -513,6 +520,44 @@ function pauseNote(usageFraction: number | null): string {
   return (
     "\n\n_Ég hef tekið mörg skref og geri hlé hér. Verkinu er kannski ekki alveg lokið — skrifaðu **haltu áfram** og ég held áfram þaðan sem frá var horfið._"
   );
+}
+
+/**
+ * Compact Lotur overview built from text we already have — no AI call, so it
+ * costs the client nothing. The title already carries the task (latest user
+ * message); the summary carries the OUTCOME: Eva's final reply, clipped, plus
+ * a paused marker when the task needs a "haltu áfram".
+ */
+function buildSessionSummary(
+  finalMessages: ProxyMessage[],
+  paused: boolean,
+  actionCount: number,
+): string {
+  let finalReply = "";
+  for (let i = finalMessages.length - 1; i >= 0; i--) {
+    const m = finalMessages[i];
+    if (m.role !== "assistant") continue;
+    if (typeof m.content === "string") {
+      finalReply = m.content.trim();
+    } else if (Array.isArray(m.content)) {
+      finalReply = (m.content as any[])
+        .filter((b) => b?.type === "text" && typeof b.text === "string")
+        .map((b) => b.text)
+        .join(" ")
+        .trim();
+    }
+    if (finalReply) break;
+  }
+
+  const outcome = finalReply
+    ? clipText(finalReply, 400)
+    : `${actionCount} aðgerðir framkvæmdar.`;
+  return paused ? `Í bið — verki ekki lokið. ${outcome}` : outcome;
+}
+
+function clipText(s: string, max: number): string {
+  const oneLine = s.replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine;
 }
 
 /** Use the latest user message as the session title. */
