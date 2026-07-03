@@ -207,7 +207,7 @@ export interface AgentLoopArgs {
 
 export async function runAgentLoop(
   args: AgentLoopArgs,
-): Promise<{ info: ChatStopInfo; messages: ProxyMessage[] }> {
+): Promise<{ info: ChatStopInfo; messages: ProxyMessage[]; paused: boolean }> {
   const { settings, accessToken, signal, callbacks } = args;
   const messages: ProxyMessage[] = [...args.initialMessages];
 
@@ -318,17 +318,13 @@ export async function runAgentLoop(
     messages.push({ role: "user", content: toolResultBlocks });
   }
 
-  // Hit the round cap with work still in flight (never reached end_turn).
-  // Tell the user instead of stopping silently — thanks to cross-turn memory,
-  // "haltu áfram" ("continue") will pick up exactly where Eva left off.
-  if (!endedTurn && !signal.aborted) {
-    const note =
-      "\n\n_Ég hef tekið mörg skref í einu og geri hlé hér. Verkinu er kannski ekki alveg lokið — skrifaðu **haltu áfram** og ég held áfram þaðan sem frá var horfið._";
-    callbacks.onTextDelta(note);
-    messages.push({ role: "assistant", content: note.trim() });
-  }
+  // `paused` = hit the round cap with work still in flight (never reached
+  // end_turn). The background turns this into a user-facing note that's aware
+  // of the user's monthly budget — so it can warn before continuing eats the
+  // rest of their usage. Cross-turn memory means "haltu áfram" resumes cleanly.
+  const paused = !endedTurn && !signal.aborted;
 
-  return { info: lastInfo, messages };
+  return { info: lastInfo, messages, paused };
 }
 
 export { ProxyError };

@@ -189,7 +189,7 @@ async function startStream(
   const sessionStartedAt = new Date().toISOString();
 
   try {
-    const { info } = await runAgentLoop({
+    const { info, paused } = await runAgentLoop({
       settings,
       accessToken,
       initialMessages: messages,
@@ -255,6 +255,17 @@ async function startStream(
         });
       },
     });
+    // If Eva paused at the round cap, tell the user — and make the note aware
+    // of their monthly budget so they can decide before continuing burns it.
+    if (paused) {
+      const bearer = accessToken ?? settings.sharedSecret;
+      const frac = await fetchUsageFraction(settings.proxyUrl, bearer);
+      safePost(port, {
+        type: "chat/delta",
+        assistantMessageId,
+        text: pauseNote(frac),
+      });
+    }
     safePost(port, {
       type: "chat/done",
       assistantMessageId,
@@ -451,6 +462,57 @@ async function maybePushSession(
   } catch (err) {
     console.warn("[eva-insight] session sync threw", err);
   }
+}
+
+/**
+ * Fetch how much of the user's monthly token budget is spent (0–1), taking the
+ * higher of the input/output fractions. Returns null for dev-unlimited users or
+ * on any error — callers treat null as "no budget warning".
+ */
+async function fetchUsageFraction(
+  proxyUrl: string,
+  bearer: string,
+): Promise<number | null> {
+  if (!proxyUrl.trim() || !bearer.trim()) return null;
+  try {
+    const res = await fetch(new URL("/v1/me", proxyUrl).toString(), {
+      headers: { Authorization: `Bearer ${bearer}` },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      mode?: string;
+      cap?: { input_tokens?: number; output_tokens?: number };
+      used?: { input_tokens?: number; output_tokens?: number };
+    };
+    if (data.mode !== "metered" || !data.cap || !data.used) return null;
+    const inFrac =
+      (data.cap.input_tokens ?? 0) > 0
+        ? (data.used.input_tokens ?? 0) / (data.cap.input_tokens ?? 1)
+        : 0;
+    const outFrac =
+      (data.cap.output_tokens ?? 0) > 0
+        ? (data.used.output_tokens ?? 0) / (data.cap.output_tokens ?? 1)
+        : 0;
+    return Math.max(inFrac, outFrac);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The note Eva shows when she pauses at the round cap. If the user is deep into
+ * their monthly budget, warn them before continuing spends the rest.
+ */
+function pauseNote(usageFraction: number | null): string {
+  if (usageFraction != null && usageFraction >= 0.7) {
+    const pct = Math.min(99, Math.round(usageFraction * 100));
+    return (
+      `\n\n_Ég hef tekið mörg skref og geri hlé hér. ⚠️ Þú ert búin að nota um **${pct}%** af Eva-notkuninni þinni í þessum mánuði — ef ég held áfram gæti þetta verk klárað stóran hluta af því sem eftir er. Skrifaðu **haltu áfram** ef þú vilt samt að ég haldi áfram._`
+    );
+  }
+  return (
+    "\n\n_Ég hef tekið mörg skref og geri hlé hér. Verkinu er kannski ekki alveg lokið — skrifaðu **haltu áfram** og ég held áfram þaðan sem frá var horfið._"
+  );
 }
 
 /** Use the latest user message as the session title. */
