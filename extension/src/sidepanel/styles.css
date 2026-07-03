@@ -832,11 +832,21 @@ textarea {
 .eva-usage-bar-fill {
   height: 100%;
   background: var(--eva-frame);
-  transition: width 240ms ease;
+  transition: width 240ms ease, background-color 240ms ease;
 }
 
-.eva-usage-bar-fill-warn {
-  background: linear-gradient(90deg, var(--eva-frame) 0%, #d97757 100%);
+/* Traffic light: plenty left → getting warm → nearly out. Muted tones so
+   they sit comfortably on the blush palette. */
+.eva-usage-bar-fill-ok {
+  background: #5d8a5e;
+}
+
+.eva-usage-bar-fill-mid {
+  background: #d9913b;
+}
+
+.eva-usage-bar-fill-high {
+  background: var(--eva-frame);
 }
 
 .eva-usage-pct {
@@ -846,6 +856,11 @@ textarea {
   font-variant-numeric: tabular-nums;
   min-width: 32px;
   text-align: right;
+}
+
+.eva-usage-pct-high {
+  color: var(--eva-frame);
+  font-weight: 700;
 }
 
 .eva-usage-detail {

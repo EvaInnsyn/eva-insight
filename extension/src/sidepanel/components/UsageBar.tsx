@@ -24,10 +24,14 @@ export function UsageBar({ info, error }: Props) {
     );
   }
 
-  const used = info.used.output_tokens;
-  const cap = info.cap.output_tokens;
-  const pct = Math.min(100, Math.round((used / Math.max(1, cap)) * 100));
-  const high = pct >= 80;
+  // A user is blocked when EITHER cap is hit, so the bar tracks whichever
+  // budget is closer to running out (matches the server's overCap logic).
+  const outFrac = info.used.output_tokens / Math.max(1, info.cap.output_tokens);
+  const inFrac = info.used.input_tokens / Math.max(1, info.cap.input_tokens);
+  const frac = Math.max(outFrac, inFrac);
+  const pct = Math.min(100, Math.round(frac * 100));
+  // Traffic light: green → amber → red as the month's budget is spent.
+  const stage = pct >= 80 ? "high" : pct >= 50 ? "mid" : "ok";
   const resetsDate = formatResetDate(info.period.resets_at);
   const planLabel = info.plan ? formatPlanName(info.plan) : null;
 
@@ -42,14 +46,14 @@ export function UsageBar({ info, error }: Props) {
       <div className="eva-usage-row">
         <div className="eva-usage-bar">
           <div
-            className={`eva-usage-bar-fill ${high ? "eva-usage-bar-fill-warn" : ""}`}
+            className={`eva-usage-bar-fill eva-usage-bar-fill-${stage}`}
             style={{ width: `${pct}%` }}
           />
         </div>
-        <div className="eva-usage-pct">{pct}%</div>
+        <div className={`eva-usage-pct eva-usage-pct-${stage}`}>{pct}%</div>
       </div>
       <div className="eva-usage-detail">
-        {fmt(used)} / {fmt(cap)} output tokens
+        {fmt(info.used.output_tokens)} / {fmt(info.cap.output_tokens)} output tokens
       </div>
     </div>
   );
