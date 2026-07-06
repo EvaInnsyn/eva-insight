@@ -18,6 +18,7 @@ import { initDb } from "./db.js";
 import { chatRoute } from "./routes/chat.js";
 import { meRoute } from "./routes/me.js";
 import { adminRoute } from "./routes/admin.js";
+import { planRoute } from "./routes/plan.js";
 
 const env = loadEnv();
 const origins = allowedOrigins(env);
@@ -50,6 +51,7 @@ app.get("/healthz", (c) =>
 
 app.route("/v1/chat", chatRoute);
 app.route("/v1/me", meRoute);
+app.route("/v1/plan", planRoute);
 app.route("/admin", adminRoute);
 
 app.notFound((c) =>
