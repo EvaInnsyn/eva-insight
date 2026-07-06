@@ -18,8 +18,10 @@ import {
   revokeUser,
   adjustCap,
   createUser,
+  setUserPlan,
   type User,
 } from "../db.js";
+import { PLANS, type PlanId } from "../plans.js";
 import { loadEnv } from "../env.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -95,9 +97,45 @@ function bar(used: number, cap: number, color: string): string {
   <small style="color:#999;font-size:11px">${used.toLocaleString()} / ${cap.toLocaleString()} (${pct}%)</small>`;
 }
 
+/** Sonnet 4.6 pricing — matches plans.ts assumptions. */
+const USD_PER_M_INPUT = 3;
+const USD_PER_M_OUTPUT = 15;
+
+function estUsd(inputTokens: number, outputTokens: number): number {
+  return (inputTokens / 1e6) * USD_PER_M_INPUT + (outputTokens / 1e6) * USD_PER_M_OUTPUT;
+}
+
+const PLAN_COLORS: Record<PlanId, string> = {
+  innsyn: "#8a7aa0",
+  yfirsyn: "#7b3fc4",
+  umsja: "#6b1a2e",
+};
+
+function planBadge(plan: PlanId): string {
+  const p = PLANS[plan];
+  const color = PLAN_COLORS[plan] ?? "#888";
+  return `<span style="display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;letter-spacing:.5px;background:${color}1a;color:${color}">${esc(p?.displayName ?? plan)}</span>`;
+}
+
+function planButtons(u: User): string {
+  return (Object.keys(PLANS) as PlanId[])
+    .map((id) => {
+      const p = PLANS[id];
+      const active = u.plan === id;
+      return `<form method="POST" action="/admin/users/${esc(u.id)}/plan" style="display:inline">
+        <input type="hidden" name="plan" value="${esc(id)}">
+        <button type="submit" ${active ? "disabled" : ""} title="${esc(p.priceIsk.toLocaleString())} kr → $${p.apiCapUsd} API"
+          style="border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:${active ? "default" : "pointer"};
+          background:${active ? PLAN_COLORS[id] : "#f0e8f5"};color:${active ? "white" : "#6b1a2e"};opacity:${active ? 1 : 0.9}">
+          ${esc(p.displayName)}</button>
+      </form>`;
+    })
+    .join(" ");
+}
+
 function rows(users: User[]): string {
   if (users.length === 0) {
-    return `<tr><td colspan="7" style="padding:32px;text-align:center;color:#aaa;font-size:13px">No users yet — add one above.</td></tr>`;
+    return `<tr><td colspan="8" style="padding:32px;text-align:center;color:#aaa;font-size:13px">No users yet — add one above.</td></tr>`;
   }
   return users
     .map((u) => {
@@ -108,10 +146,11 @@ function rows(users: User[]): string {
       return `<tr>
       <td style="padding:14px 16px;font-weight:500">${esc(u.name)}</td>
       <td style="padding:14px 16px">${badge}</td>
-      <td style="padding:14px 16px;color:#888;font-size:13px">${esc(u.period_key)}</td>
+      <td style="padding:14px 16px">${planBadge(u.plan)}<div style="margin-top:6px">${planButtons(u)}</div></td>
       <td style="padding:14px 16px">${bar(u.period_input_tokens, u.monthly_cap_input_tokens, "#6b1a2e")}</td>
       <td style="padding:14px 16px">${bar(u.period_output_tokens, u.monthly_cap_output_tokens, "#7b3fc4")}</td>
-      <td style="padding:14px 16px;font-family:monospace;font-size:11px;color:#aaa">${esc(u.token.slice(0, 20))}…</td>
+      <td style="padding:14px 16px;font-size:12px;color:#555">$${estUsd(u.period_input_tokens, u.period_output_tokens).toFixed(2)}</td>
+      <td style="padding:14px 16px;font-family:monospace;font-size:11px;color:#aaa">${esc(u.token.slice(0, 12))}…</td>
       <td style="padding:14px 16px">
         ${
           !revoked
@@ -132,6 +171,29 @@ function rows(users: User[]): string {
     </tr>`;
     })
     .join("");
+}
+
+/**
+ * Month-to-date totals across all users — the number to watch against your
+ * Anthropic credit balance. Active = not revoked.
+ */
+function summaryHtml(users: User[]): string {
+  const active = users.filter((u) => !u.revoked_at);
+  const inTok = active.reduce((s, u) => s + u.period_input_tokens, 0);
+  const outTok = active.reduce((s, u) => s + u.period_output_tokens, 0);
+  const cost = estUsd(inTok, outTok);
+  const revenueIsk = active.reduce((s, u) => s + (PLANS[u.plan]?.priceIsk ?? 0), 0);
+  const stat = (label: string, value: string, sub?: string) =>
+    `<div style="background:white;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.06);padding:16px 20px;min-width:170px">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#999;font-weight:600">${label}</div>
+      <div style="font-size:22px;font-weight:700;color:#6b1a2e;margin-top:4px">${value}</div>
+      ${sub ? `<div style="font-size:11px;color:#aaa;margin-top:2px">${sub}</div>` : ""}
+    </div>`;
+  return `<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:26px">
+    ${stat("Est. API cost this month", `$${cost.toFixed(2)}`, "Sonnet 4.6 rates — check vs Anthropic credits")}
+    ${stat("Plan revenue / month", `${revenueIsk.toLocaleString()} kr`, `${active.length} active user${active.length === 1 ? "" : "s"}`)}
+    ${stat("Tokens this month", `${(inTok / 1e6).toFixed(1)}M in`, `${(outTok / 1e6).toFixed(2)}M out`)}
+  </div>`;
 }
 
 function dashboardHtml(
@@ -183,6 +245,8 @@ tr:not(:last-child) td { border-bottom:1px solid #faf0f5; }
       : ""
   }
 
+  ${summaryHtml(users)}
+
   <div class="sh">
     <h2>Users <span style="color:#aaa;font-weight:400">(${users.length})</span></h2>
     <button class="btn-add" onclick="document.getElementById('af').style.display='block';this.style.display='none'">+ Add user</button>
@@ -200,8 +264,8 @@ tr:not(:last-child) td { border-bottom:1px solid #faf0f5; }
   <div class="card">
     <table>
       <thead><tr>
-        <th>Name</th><th>Status</th><th>Period</th>
-        <th>Input tokens</th><th>Output tokens</th><th>Token prefix</th><th>Actions</th>
+        <th>Name</th><th>Status</th><th>Plan</th>
+        <th>Input tokens</th><th>Output tokens</th><th>Est. cost</th><th>Token</th><th>Actions</th>
       </tr></thead>
       <tbody>${rows(users)}</tbody>
     </table>
@@ -284,5 +348,15 @@ adminRoute.post("/users/:id/cap", async (c) => {
   const input = body.input_tokens ? Number(body.input_tokens) : null;
   const output = body.output_tokens ? Number(body.output_tokens) : null;
   adjustCap(c.req.param("id"), input, output);
+  return c.redirect("/admin");
+});
+
+// One-click plan change — sets plan AND both token caps to the plan's values.
+adminRoute.post("/users/:id/plan", async (c) => {
+  const body = await c.req.parseBody();
+  const plan = String(body.plan ?? "");
+  if (plan in PLANS) {
+    setUserPlan(c.req.param("id"), plan as PlanId);
+  }
   return c.redirect("/admin");
 });
