@@ -81,8 +81,19 @@ export function loadEnv(): Env {
   return cached;
 }
 
+/**
+ * The Eva Innsýn platform (app.evai.is) embeds Eva chat in the dashboard and
+ * calls /v1/chat + /v1/me straight from the browser, so its origins are always
+ * allowed in addition to whatever extension origins the env configures.
+ */
+const PLATFORM_ORIGINS = [
+  "https://app.evai.is",
+  "https://eva-innsyn.vercel.app",
+];
+
 export function allowedOrigins(env: Env): string[] {
-  return env.EVA_INSIGHT_ALLOWED_ORIGINS.split(",")
+  const configured = env.EVA_INSIGHT_ALLOWED_ORIGINS.split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+  return [...new Set([...configured, ...PLATFORM_ORIGINS])];
 }
