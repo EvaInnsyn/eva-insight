@@ -51,6 +51,7 @@ export type PageRequest =
   | { type: "page/scrollTo"; elementId: string }
   | { type: "page/formInput"; elementId: string; value: string }
   | { type: "page/rect"; elementId: string }
+  | { type: "page/find"; query: string }
   | { type: "page/waitFor"; timeoutMs?: number };
 
 /** Fresh viewport-CSS-px geometry of an element (after scroll-into-view). */

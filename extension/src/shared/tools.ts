@@ -54,6 +54,21 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
     },
   },
   {
+    name: "find",
+    description:
+      "Find elements by natural language — 'font selector', 'save button', 'menu item Lexend', 'email field'. Returns up to 10 ranked matches with element ids (use with click/hover/type) plus their measured on-screen centers and sizes. START HERE for any interaction with a control: it is faster, cheaper and more precise than reading the whole page or estimating pixels from a screenshot. Only visible elements match.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "What you're looking for, in a few words. Include the widget kind when known (button, field, dropdown, menu item).",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
     name: "read_page",
     description:
       "Read the currently active browser tab as a structured tree (headings, links, buttons, form fields, paragraphs). The FAST PATH on ordinary websites — prefer it over screenshots when the page has real DOM content. Each interactive element gets a short id (e.g. `e42`) usable with click/type. Ids reset when the page navigates. On canvas-based editors (Word Online, Google Docs, design tools) this sees little — use the computer tool there.",
@@ -105,6 +120,18 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
         },
       },
       required: ["element_id", "value"],
+    },
+  },
+  {
+    name: "hover",
+    description:
+      "Rest the REAL mouse on an element's measured center WITHOUT clicking, then wait 600ms. Use for hover-driven UI: menu items with a ▸ submenu arrow, tooltips, reveal-on-hover controls. Typical flow: hover the parent item by id → read_page (the submenu is now in the DOM) → click the submenu entry by id.",
+    input_schema: {
+      type: "object",
+      properties: {
+        element_id: { type: "string", description: "Id from a recent read_page." },
+      },
+      required: ["element_id"],
     },
   },
   {
@@ -233,9 +260,11 @@ export const EVA_SYSTEM_PROMPT = `You are Eva — a digital employee who lives i
 You control ONE browser tab — the user's active tab. The computer tool sees and acts on that tab's viewport only (not the whole desktop, no other apps, no browser UI). Coordinates come from your latest screenshot.
 
 ## How to work — speed matters
+- **find first.** When you need a specific control ("the font selector", "the save button"), call find — it returns exact elements with ids you can click/hover/type in one step. Only fall back to read_page (whole tree) or screenshots when find comes up empty.
 - **batch_actions is your default for acting.** One call = several steps (click field → type → press Enter; or menu click → wait → next click). It always returns a fresh screenshot. Single computer actions are for when you genuinely need to see the result before deciding the next step.
-- **Ordinary websites: use the DOM fast path.** read_page gives you element ids; click/type by id is faster and more precise than pixels. Use the computer tool when the page is a canvas editor, heavy custom widgets, or read_page comes back thin.
+- **Ordinary websites: use the DOM fast path.** find/read_page give you element ids; click/type by id is faster and more precise than pixels. Use the computer tool when the page is a canvas editor, heavy custom widgets, or the DOM tools come back thin.
 - **Toolbars, menus, dropdowns — even in canvas editors — are DOM.** The document area of Google Docs/Word Online is a canvas, but their toolbars and menus appear in read_page. When a coordinate click on a control seems to do nothing, don't keep re-clicking pixels: read_page, find the control by name, and use the click tool (it presses a real mouse at the element's measured center). Example: changing a font — select the text with the keyboard, read_page, click the font combobox by id, type the font name, press Return.
+- **Submenu items (▸ arrow) open on HOVER, not click.** Clicking the parent applies the parent itself. Use hover on the parent item by id → read_page → click the submenu entry by id. (E.g. font weights like "Thin" live in a submenu under the font's name.)
 - **Canvas editors (Word Online, Google Docs, design tools): prefer the keyboard.** Click once into the document, then use shortcuts — ctrl+a to select all, ctrl+b bold, arrow keys, Home/End. Shortcuts beat pixel-hunting toolbars. If a shortcut does nothing, the user may be on Mac — try cmd instead of ctrl once, then stick with what worked.
 - **Small text you can't read: zoom.** The zoom action shows a region at full resolution. Never take coordinates from a zoomed image — screenshot again for coordinates.
 - Text selection on a canvas: left_click_drag from start to end of the text, or click then shift+arrow/shift+End via key.

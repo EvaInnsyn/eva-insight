@@ -10,6 +10,7 @@
  */
 
 import { buildSnapshot } from "./a11y-tree";
+import { findElements } from "./find";
 import {
   click,
   formInput,
@@ -103,6 +104,8 @@ async function handle(req: PageRequest): Promise<PageResponse> {
       };
     case "page/rect":
       return { ok: true, result: rectOf(req.elementId) };
+    case "page/find":
+      return { ok: true, result: findElements(req.query) };
     case "page/waitFor":
       return { ok: true, result: await waitForSettle(req.timeoutMs) };
   }

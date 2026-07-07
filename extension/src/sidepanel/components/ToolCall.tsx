@@ -85,6 +85,8 @@ function labelFor(name: string, input?: unknown): string {
     return n > 0 ? `${n} quick steps` : "Quick steps";
   }
   switch (name) {
+    case "find": return "Finding";
+    case "hover": return "Hovering";
     case "read_page": return "Reading page";
     case "get_active_tab": return "Checking tab";
     case "click": return "Clicking";
@@ -111,6 +113,8 @@ function iconFor(name: string): string {
   switch (name) {
     case "computer": return "🖱";
     case "batch_actions": return "⚡";
+    case "find": return "🔎";
+    case "hover": return "👇";
     case "read_page": return "📄";
     case "get_active_tab":
     case "tabs_list":
@@ -145,6 +149,9 @@ function summaryFor(call: ChatToolCall): string | null {
     return null;
   }
   switch (call.name) {
+    case "find":
+      return typeof input.query === "string" ? `"${input.query}"` : null;
+    case "hover":
     case "click":
     case "scroll_to":
       return typeof input.element_id === "string" ? input.element_id : null;

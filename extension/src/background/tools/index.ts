@@ -16,12 +16,14 @@
 
 import {
   clickInActivePage,
+  findInActivePage,
   formInputInActivePage,
   getActiveTab,
   readActivePage,
   rectInActivePage,
   scrollActivePageTo,
   typeInActivePage,
+  waitForSettleInActivePage,
 } from "../page-bridge";
 
 export type ToolHandler = (input: any) => Promise<unknown>;
@@ -560,7 +562,10 @@ const HANDLERS: Record<string, ToolHandler> = {
         break;
       }
     }
-    await new Promise((r) => setTimeout(r, 350));
+    // Let the page settle (DOM quiet or 1.2s cap) before the result shot.
+    await waitForSettleInActivePage(1200).catch(
+      () => new Promise((r) => setTimeout(r, 350)),
+    );
     const shot = await takeScreenshot().catch(() => null);
     return {
       ...(shot ?? {}),
@@ -581,6 +586,23 @@ const HANDLERS: Record<string, ToolHandler> = {
       _note: "Page snapshot was too large and has been truncated to fit the context window. Focus on visible elements only.",
       data: json.slice(0, 40_000),
     };
+  },
+
+  /**
+   * Semantic element search — "font selector", "save button", "menu item
+   * Lexend". Returns ranked matches with ids (for click/hover/type) and
+   * measured centers. Far cheaper and more precise than a full read_page.
+   */
+  async find({ query }: { query: string }) {
+    requireString(query, "query");
+    const matches = await findInActivePage(query);
+    if (Array.isArray(matches) && matches.length === 0) {
+      return {
+        matches: [],
+        note: "No visible element matched. Try different words, read_page for the full tree, or a screenshot if this is a canvas area.",
+      };
+    }
+    return { matches };
   },
 
   async get_active_tab() {
@@ -624,6 +646,21 @@ const HANDLERS: Record<string, ToolHandler> = {
     requireString(element_id, "element_id");
     requireString(text, "text");
     return await typeInActivePage(element_id, text, !append);
+  },
+
+  /**
+   * Rest the real mouse on an element's center without clicking — opens
+   * hover-driven UI (submenus with ▸ arrows, tooltips, reveal-on-hover
+   * toolbars). Waits 600ms after moving so the UI has time to open.
+   */
+  async hover({ element_id }: { element_id: string }) {
+    requireString(element_id, "element_id");
+    const rect = await rectInActivePage(element_id);
+    const tab = await getActiveTab();
+    if (tab.id === undefined) throw new Error("no active tab");
+    await mouseMove(tab.id, rect.cx, rect.cy, 0);
+    await new Promise((r) => setTimeout(r, 600));
+    return { hovering: element_id, at: [rect.cx, rect.cy] };
   },
 
   async scroll_to({ element_id }: { element_id: string }) {

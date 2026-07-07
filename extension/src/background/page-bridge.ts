@@ -171,3 +171,15 @@ export async function rectInActivePage(elementId: string): Promise<ElementRect> 
   const tab = await getActiveTab();
   return await send<ElementRect>(tab.id!, { type: "page/rect", elementId });
 }
+
+/** Semantic element search — ranked matches with ids + measured centers. */
+export async function findInActivePage(query: string): Promise<unknown> {
+  const tab = await getActiveTab();
+  return await send(tab.id!, { type: "page/find", query });
+}
+
+/** Wait until the DOM stops mutating (or timeout) — post-action settle. */
+export async function waitForSettleInActivePage(timeoutMs?: number): Promise<unknown> {
+  const tab = await getActiveTab();
+  return await send(tab.id!, { type: "page/waitFor", timeoutMs });
+}
