@@ -611,16 +611,23 @@ async function captureRaw(): Promise<{ dataUrl: string; dpr: number; tab: chrome
   } catch {
     // restricted page — assume 1x
   }
-  // Visible path: classic capture, no debugger banner needed.
+  // Visible path: classic capture, no debugger banner needed. A minimized
+  // window can return a stale frame WITHOUT throwing, so check state first.
   if (tab.active && tab.windowId !== undefined) {
+    let minimized = false;
     try {
-      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-        format: "jpeg",
-        quality: 70,
-      });
-      return { dataUrl, dpr, tab };
-    } catch {
-      // Minimized window / capture blocked — fall through to CDP below.
+      minimized = (await chrome.windows.get(tab.windowId)).state === "minimized";
+    } catch { /* window gone — CDP path handles it */ }
+    if (!minimized) {
+      try {
+        const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+          format: "jpeg",
+          quality: 70,
+        });
+        return { dataUrl, dpr, tab };
+      } catch {
+        // Capture blocked — fall through to CDP below.
+      }
     }
   }
   // Background path: the user is on another tab or window. CDP renders OUR
