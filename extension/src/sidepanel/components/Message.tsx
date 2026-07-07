@@ -14,9 +14,20 @@ export function Message({ message }: { message: ChatMessage }) {
   const hasText = message.text.length > 0;
   const hasCalls = calls.length > 0;
 
+  const exactTime = new Date(message.createdAt);
+  const hoverTitle = Number.isNaN(exactTime.getTime())
+    ? undefined
+    : exactTime.toLocaleString("is-IS", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+
   return (
     <div className={cls}>
-      <div className="eva-msg-bubble">
+      <div className="eva-msg-bubble" title={hoverTitle}>
         {hasCalls ? (
           <ActivityGroup calls={calls} streaming={message.streaming === true} />
         ) : null}

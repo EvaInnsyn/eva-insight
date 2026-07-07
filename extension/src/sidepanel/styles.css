@@ -869,6 +869,25 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
+/* WhatsApp-style time divider — a small centered chip at conversation
+   starts, quiet gaps, and day changes. */
+.eva-time-divider {
+  display: flex;
+  justify-content: center;
+  margin: 10px 0 6px;
+}
+
+.eva-time-divider span {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: var(--eva-text-dim);
+  background: var(--eva-bg-dim);
+  border: 1px solid var(--eva-frame-dim);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+
 .eva-cursor {
   display: inline-block;
   width: 7px;
