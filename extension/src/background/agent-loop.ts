@@ -55,11 +55,11 @@ function buildToolResultContent(output: string, isError: boolean): unknown {
       parsed.base64.length > 0
     ) {
       const blocks: unknown[] = [];
-      // Batch results carry a note ("completed 5/5 steps…") — text first so
-      // the model reads the outcome before looking at the screenshot.
-      if (typeof parsed.note === "string" && parsed.note) {
-        blocks.push({ type: "text", text: parsed.note });
-      }
+      // Anthropic guidance: text BEFORE the image improves click accuracy —
+      // the model reads what happened/where it is before parsing pixels.
+      const label = [parsed.title, parsed.url].filter(Boolean).join(" · ");
+      const preface = [parsed.note, label].filter(Boolean).join("\n");
+      if (preface) blocks.push({ type: "text", text: preface });
       blocks.push({
         type: "image",
         source: {
@@ -68,8 +68,6 @@ function buildToolResultContent(output: string, isError: boolean): unknown {
           data: parsed.base64,
         },
       });
-      const label = [parsed.title, parsed.url].filter(Boolean).join(" · ");
-      if (label) blocks.push({ type: "text", text: label });
       return blocks;
     }
   } catch {
@@ -79,17 +77,21 @@ function buildToolResultContent(output: string, isError: boolean): unknown {
 }
 
 /**
- * Replace all but the newest few screenshot images with short placeholders.
+ * Replace old screenshot images with short placeholders — in BATCHES.
  *
- * Must operate at the IMAGE level, not the message level: a long agentic turn
- * stores ALL its tool results (30+ screenshots) inside ONE user message, so
- * "keep the last message with images" keeps every one of them. Replaying
- * dozens of images trips Anthropic's many-image limits ("image dimensions
- * exceed max allowed size for many-image requests: 2000 pixels") and bloats
- * the payload. Keeping the last 2 images preserves visual continuity while
- * guaranteeing every request stays a small-image-count request.
+ * Anthropic's harness guidance is explicit: pruning one screenshot every
+ * turn rewrites the prompt prefix every turn and invalidates the prompt
+ * cache on every request (full input price + latency each round). So the
+ * strip boundary only advances in steps of PRUNE_BATCH: between prune
+ * events the prefix stays byte-identical and the cache stays hot. We keep
+ * at least KEEP_LAST_IMAGES and at most KEEP+BATCH-1 images; all shots are
+ * <=1400px so many-image dimension limits don't apply.
+ *
+ * Image-level, not message-level: a long agentic turn stores all its tool
+ * results inside ONE user message, so message-level pruning kept everything.
  */
-const KEEP_LAST_IMAGES = 2;
+const KEEP_LAST_IMAGES = 3;
+const PRUNE_BATCH = 8;
 
 function stripOldScreenshots(messages: ProxyMessage[]): ProxyMessage[] {
   // Collect the position of every image block inside tool_result content.
@@ -104,11 +106,12 @@ function stripOldScreenshots(messages: ProxyMessage[]): ProxyMessage[] {
     });
   });
 
-  if (positions.length <= KEEP_LAST_IMAGES) return messages;
+  // Boundary advances only in whole batches → cache-stable prefix.
+  const excess = Math.max(0, positions.length - KEEP_LAST_IMAGES);
+  const stripCount = Math.floor(excess / PRUNE_BATCH) * PRUNE_BATCH;
+  if (stripCount === 0) return messages;
   const drop = new Set(
-    positions
-      .slice(0, positions.length - KEEP_LAST_IMAGES)
-      .map((p) => `${p.msg}:${p.block}:${p.item}`),
+    positions.slice(0, stripCount).map((p) => `${p.msg}:${p.block}:${p.item}`),
   );
 
   return messages.map((m, mi) => {
@@ -170,8 +173,49 @@ function measuredSize(messages: ProxyMessage[]): number {
  * Always cuts at a "clean" user turn (string content = real question)
  * so tool_use/tool_result pairs are never split.
  */
+/**
+ * Move the conversation-side cache breakpoint to the LAST tool_result block
+ * (Anthropic guidance: breakpoints on the most recent tool results, advancing
+ * each turn — earlier segments keep hitting hierarchically). Old markers are
+ * removed; block CONTENT is untouched so the prefix bytes stay identical.
+ */
+function advanceCacheBreakpoint(messages: ProxyMessage[]): ProxyMessage[] {
+  let lastMsg = -1;
+  let lastBlock = -1;
+  messages.forEach((m, mi) => {
+    if (m.role !== "user" || !Array.isArray(m.content)) return;
+    (m.content as any[]).forEach((b, bi) => {
+      if (b?.type === "tool_result") {
+        lastMsg = mi;
+        lastBlock = bi;
+      }
+    });
+  });
+  if (lastMsg === -1) return messages;
+  return messages.map((m, mi) => {
+    if (m.role !== "user" || !Array.isArray(m.content)) return m;
+    let changed = false;
+    const blocks = (m.content as any[]).map((b, bi) => {
+      if (b?.type !== "tool_result") return b;
+      const isTarget = mi === lastMsg && bi === lastBlock;
+      const hasMark = b.cache_control != null;
+      if (isTarget && !hasMark) {
+        changed = true;
+        return { ...b, cache_control: { type: "ephemeral" } };
+      }
+      if (!isTarget && hasMark) {
+        changed = true;
+        const { cache_control: _omit, ...rest } = b;
+        return rest;
+      }
+      return b;
+    });
+    return changed ? { ...m, content: blocks } : m;
+  });
+}
+
 function pruneMessages(messages: ProxyMessage[]): ProxyMessage[] {
-  const stripped = stripOldScreenshots(messages);
+  const stripped = advanceCacheBreakpoint(stripOldScreenshots(messages));
   if (measuredSize(stripped) <= MAX_HISTORY_CHARS) return stripped;
 
   // Find indices where a real user question starts (string content, not tool results).

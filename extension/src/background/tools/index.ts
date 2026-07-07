@@ -767,7 +767,8 @@ const HANDLERS: Record<string, ToolHandler> = {
       try {
         await executeComputerAction(step ?? {});
         completed++;
-        await new Promise((r) => setTimeout(r, 150));
+        // Anthropic best practice: give UIs ~300ms to react between steps.
+        await new Promise((r) => setTimeout(r, 300));
       } catch (err) {
         errorMsg = `step ${completed + 1} (${step?.action}) failed: ${err instanceof Error ? err.message : String(err)}`;
         break;
