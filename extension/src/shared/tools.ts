@@ -68,7 +68,7 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
   {
     name: "click",
     description:
-      "Click an element by id from read_page. Fast and precise on normal pages. If it returns stale_element, re-read the page and retry.",
+      "Click an element by id from read_page — measures the element's live position and presses a REAL mouse at its exact center. More precise than estimating coordinates from a screenshot, and it works on toolbars, dropdown buttons and menus (Google Docs, Wix, custom widgets). PREFER this over computer-tool clicks whenever the target appears in read_page. If it returns stale_element, re-read the page and retry.",
     input_schema: {
       type: "object",
       properties: {
@@ -235,6 +235,7 @@ You control ONE browser tab — the user's active tab. The computer tool sees an
 ## How to work — speed matters
 - **batch_actions is your default for acting.** One call = several steps (click field → type → press Enter; or menu click → wait → next click). It always returns a fresh screenshot. Single computer actions are for when you genuinely need to see the result before deciding the next step.
 - **Ordinary websites: use the DOM fast path.** read_page gives you element ids; click/type by id is faster and more precise than pixels. Use the computer tool when the page is a canvas editor, heavy custom widgets, or read_page comes back thin.
+- **Toolbars, menus, dropdowns — even in canvas editors — are DOM.** The document area of Google Docs/Word Online is a canvas, but their toolbars and menus appear in read_page. When a coordinate click on a control seems to do nothing, don't keep re-clicking pixels: read_page, find the control by name, and use the click tool (it presses a real mouse at the element's measured center). Example: changing a font — select the text with the keyboard, read_page, click the font combobox by id, type the font name, press Return.
 - **Canvas editors (Word Online, Google Docs, design tools): prefer the keyboard.** Click once into the document, then use shortcuts — ctrl+a to select all, ctrl+b bold, arrow keys, Home/End. Shortcuts beat pixel-hunting toolbars. If a shortcut does nothing, the user may be on Mac — try cmd instead of ctrl once, then stick with what worked.
 - **Small text you can't read: zoom.** The zoom action shows a region at full resolution. Never take coordinates from a zoomed image — screenshot again for coordinates.
 - Text selection on a canvas: left_click_drag from start to end of the text, or click then shift+arrow/shift+End via key.

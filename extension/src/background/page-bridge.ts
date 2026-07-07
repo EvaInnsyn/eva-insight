@@ -5,6 +5,7 @@
  */
 
 import type {
+  ElementRect,
   PageRequest,
   PageResponse,
   PageSnapshot,
@@ -163,4 +164,10 @@ export async function formInputInActivePage(
 ): Promise<{ id: string; tag: string; state: string }> {
   const tab = await getActiveTab();
   return await send(tab.id!, { type: "page/formInput", elementId, value });
+}
+
+/** Fresh element geometry (scrolled into view) for trusted-click aiming. */
+export async function rectInActivePage(elementId: string): Promise<ElementRect> {
+  const tab = await getActiveTab();
+  return await send<ElementRect>(tab.id!, { type: "page/rect", elementId });
 }

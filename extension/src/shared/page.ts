@@ -50,7 +50,19 @@ export type PageRequest =
   | { type: "page/scroll"; direction: "up" | "down"; amount?: number }
   | { type: "page/scrollTo"; elementId: string }
   | { type: "page/formInput"; elementId: string; value: string }
+  | { type: "page/rect"; elementId: string }
   | { type: "page/waitFor"; timeoutMs?: number };
+
+/** Fresh viewport-CSS-px geometry of an element (after scroll-into-view). */
+export interface ElementRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Center point — where a real mouse click should land. */
+  cx: number;
+  cy: number;
+}
 
 export type PageResponse<T = unknown> =
   | { ok: true; result: T }

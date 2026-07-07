@@ -87,6 +87,31 @@ export function scrollTo(id: string): { x: number; y: number } {
 }
 
 /**
+ * Fresh viewport geometry for an element, scrolled into view first — used by
+ * the background to aim a REAL (CDP) mouse click at the element's center,
+ * which works on widgets that ignore synthetic .click() (Google Docs
+ * toolbars, custom dropdowns, mousedown-driven menus).
+ */
+export function rectOf(id: string): {
+  x: number; y: number; w: number; h: number; cx: number; cy: number;
+} {
+  const el = mustResolve(id);
+  scrollIntoViewSafe(el);
+  const r = el.getBoundingClientRect();
+  if (r.width === 0 && r.height === 0) {
+    throw new Error(`element ${id} has no layout (hidden?)`);
+  }
+  return {
+    x: r.left,
+    y: r.top,
+    w: r.width,
+    h: r.height,
+    cx: Math.round(r.left + r.width / 2),
+    cy: Math.round(r.top + r.height / 2),
+  };
+}
+
+/**
  * Set the value of a select/checkbox/radio. For text inputs, use
  * `typeText` instead.
  */

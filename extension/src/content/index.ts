@@ -13,6 +13,7 @@ import { buildSnapshot } from "./a11y-tree";
 import {
   click,
   formInput,
+  rectOf,
   scroll,
   scrollTo,
   StaleElementError,
@@ -100,6 +101,8 @@ async function handle(req: PageRequest): Promise<PageResponse> {
         ok: true,
         result: formInput(req.elementId, req.value),
       };
+    case "page/rect":
+      return { ok: true, result: rectOf(req.elementId) };
     case "page/waitFor":
       return { ok: true, result: await waitForSettle(req.timeoutMs) };
   }

@@ -19,6 +19,7 @@ import {
   formInputInActivePage,
   getActiveTab,
   readActivePage,
+  rectInActivePage,
   scrollActivePageTo,
   typeInActivePage,
 } from "../page-bridge";
@@ -593,7 +594,22 @@ const HANDLERS: Record<string, ToolHandler> = {
 
   async click({ element_id }: { element_id: string }) {
     requireString(element_id, "element_id");
-    return await clickInActivePage(element_id);
+    // Trusted click: measure the element's live center, then press a REAL
+    // mouse there via CDP. Synthetic .click() fires no mousedown, which
+    // mousedown-driven widgets (Google Docs toolbar, custom menus) ignore.
+    try {
+      const rect = await rectInActivePage(element_id);
+      const tab = await getActiveTab();
+      if (tab.id === undefined) throw new Error("no active tab");
+      await mouseClick(tab.id, rect.cx, rect.cy, "left", 1, 0);
+      return { clicked: element_id, at: [rect.cx, rect.cy], method: "mouse" };
+    } catch (err) {
+      // Stale ids must surface so the model re-reads; anything else (CDP
+      // unavailable, restricted page) falls back to the DOM click.
+      if (err instanceof Error && err.name === "stale_element") throw err;
+      const domResult = await clickInActivePage(element_id);
+      return { ...domResult, method: "dom" };
+    }
   },
 
   async type({
