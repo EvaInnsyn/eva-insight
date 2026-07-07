@@ -12,7 +12,7 @@
  */
 
 import type { ChatStopInfo, ProxyMessage } from "../shared/chat";
-import type { ToolSchema } from "../shared/tools";
+import { EVA_TOOL_BETAS, type ToolSchema } from "../shared/tools";
 import { parseSseStream } from "./sse";
 import type { EvaSettings } from "./settings";
 
@@ -101,6 +101,7 @@ export async function runChat(args: RunChatArgs): Promise<RunChatResult> {
       system,
       messages,
       tools,
+      betas: EVA_TOOL_BETAS,
       thinking: { type: "adaptive" },
       max_tokens: 32768,
     }),

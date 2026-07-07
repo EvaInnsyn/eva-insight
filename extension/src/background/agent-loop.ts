@@ -7,7 +7,7 @@
  * hit MAX_TOOL_ROUNDS.
  */
 
-import { runTool } from "./tools";
+import { runTool, probeDisplayDims } from "./tools";
 import {
   ProxyError,
   runChat,
@@ -18,7 +18,7 @@ import type { EvaSettings } from "./settings";
 import type { ChatStopInfo } from "../shared/chat";
 import {
   EVA_SYSTEM_PROMPT,
-  EVA_TOOLS,
+  buildEvaTools,
   needsConfirmation,
 } from "../shared/tools";
 import { getActiveTab } from "./page-bridge";
@@ -46,22 +46,27 @@ function buildToolResultContent(output: string, isError: boolean): unknown {
       base64?: string;
       url?: string;
       title?: string;
+      note?: string;
     };
     if (
       typeof parsed.mime_type === "string" &&
       parsed.mime_type.startsWith("image/") &&
       typeof parsed.base64 === "string"
     ) {
-      const blocks: unknown[] = [
-        {
-          type: "image",
-          source: {
-            type: "base64",
-            media_type: parsed.mime_type,
-            data: parsed.base64,
-          },
+      const blocks: unknown[] = [];
+      // Batch results carry a note ("completed 5/5 steps…") — text first so
+      // the model reads the outcome before looking at the screenshot.
+      if (typeof parsed.note === "string" && parsed.note) {
+        blocks.push({ type: "text", text: parsed.note });
+      }
+      blocks.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: parsed.mime_type,
+          data: parsed.base64,
         },
-      ];
+      });
       const label = [parsed.title, parsed.url].filter(Boolean).join(" · ");
       if (label) blocks.push({ type: "text", text: label });
       return blocks;
@@ -226,6 +231,11 @@ export async function runAgentLoop(
   let lastInfo: ChatStopInfo = { stop_reason: null };
   let endedTurn = false;
 
+  // Declare the computer tool's display size from the live viewport so the
+  // model's coordinates match the screenshots exactly. Once per run.
+  const display = await probeDisplayDims();
+  const tools = buildEvaTools(display);
+
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (signal.aborted) break;
 
@@ -234,7 +244,7 @@ export async function runAgentLoop(
       accessToken,
       system: EVA_SYSTEM_PROMPT,
       messages: pruneMessages(messages),
-      tools: EVA_TOOLS,
+      tools,
       signal,
       onTextDelta: callbacks.onTextDelta,
       onToolUseStart: (tu) => {

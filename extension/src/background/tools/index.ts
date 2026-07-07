@@ -1,11 +1,17 @@
 /**
  * Tool dispatcher.
  *
+ * Two layers of tools:
+ *  - Anthropic's official computer-use tool (`computer`, type computer_20251124)
+ *    — the interface the model is trained on: screenshot, clicks, drag, keys,
+ *    scroll, zoom. Executed via Chrome Debugger Protocol on the active tab.
+ *  - Custom DOM fast-path tools (read_page, click-by-id, type-by-id, …) for
+ *    ordinary pages, plus tabs/navigate, plus `batch_actions` which runs a
+ *    predictable sequence of computer actions in ONE round trip.
+ *
  * Each handler returns a JSON-serializable value; the result gets
  * `JSON.stringify`'d before going back to Claude as `tool_result.content`.
- *
- * Handlers throw on failure; the agent loop catches and returns
- * `is_error: true` to the model.
+ * Handlers throw on failure; the agent loop returns `is_error: true`.
  */
 
 import {
@@ -13,34 +19,556 @@ import {
   formInputInActivePage,
   getActiveTab,
   readActivePage,
-  scrollActivePage,
   scrollActivePageTo,
   typeInActivePage,
 } from "../page-bridge";
-import type { EvaToolName } from "../../shared/tools";
 
 export type ToolHandler = (input: any) => Promise<unknown>;
+
+// ── Screenshot sizing ─────────────────────────────────────────────────────────
 
 /**
  * Coordinate-space bridge between the screenshot the model sees and the CSS
  * pixels CDP needs. On a retina display captureVisibleTab returns a 2x image;
  * CDP Input events use CSS pixels. We downscale the screenshot to CSS-pixel
- * dimensions (kept under Anthropic's ~1568px rescale threshold) so the model's
- * reported coordinates map 1:1 to the pixels we click. `coordScale` is CSS px
- * per image px — updated on every screenshot, applied on every click.
+ * dimensions (kept under Anthropic's rescale threshold) so the model's
+ * reported coordinates map 1:1. `coordScale` = CSS px per image px — updated
+ * on every screenshot, applied on every mouse action.
  */
 let coordScale = 1;
 
-/**
- * Bounds that keep the sent image under Anthropic's internal rescale (which
- * would otherwise change the coordinate space): <=1400px long edge AND
- * <=1.1 megapixels total. Staying under both means the model sees exactly the
- * pixels we send, so its click coordinates map cleanly back to CSS px.
- */
+/** Last known mouse position (image px), for cursor_position / mouse_up. */
+let lastPos = { x: 0, y: 0 };
+
 const MAX_SHOT_EDGE = 1400;
 const MAX_SHOT_AREA = 1_100_000;
 
-const HANDLERS: Record<EvaToolName, ToolHandler> = {
+/**
+ * Probe the active tab's viewport and return the dimensions screenshots will
+ * be sent at — used to declare display_width/height_px on the computer tool.
+ * Falls back to a common laptop viewport on restricted pages.
+ */
+export async function probeDisplayDims(): Promise<{ width: number; height: number }> {
+  try {
+    const tab = await getActiveTab();
+    if (tab.id !== undefined) {
+      const [res] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => ({ w: window.innerWidth, h: window.innerHeight }),
+      });
+      const r = res?.result as { w?: number; h?: number } | undefined;
+      if (r && typeof r.w === "number" && r.w > 0 && typeof r.h === "number" && r.h > 0) {
+        return computeShotDims(r.w, r.h);
+      }
+    }
+  } catch {
+    // fall through to default
+  }
+  return computeShotDims(1280, 800);
+}
+
+/**
+ * Given a CSS-pixel viewport, the dimensions screenshots will be sent at.
+ * Exported so the agent loop can declare display_width/height_px on the
+ * computer tool to exactly match what the model will see.
+ */
+export function computeShotDims(cssW: number, cssH: number): { width: number; height: number } {
+  const longEdge = Math.max(cssW, cssH);
+  const clampEdge = longEdge > MAX_SHOT_EDGE ? MAX_SHOT_EDGE / longEdge : 1;
+  const area = cssW * cssH;
+  const clampArea = area > MAX_SHOT_AREA ? Math.sqrt(MAX_SHOT_AREA / area) : 1;
+  const clamp = Math.min(clampEdge, clampArea);
+  return {
+    width: Math.max(1, Math.round(cssW * clamp)),
+    height: Math.max(1, Math.round(cssH * clamp)),
+  };
+}
+
+// ── CDP session (persistent attach, idle detach) ─────────────────────────────
+
+let attachedTabId: number | null = null;
+let detachTimer: ReturnType<typeof setTimeout> | null = null;
+
+chrome.debugger.onDetach.addListener((source) => {
+  if (source.tabId === attachedTabId) attachedTabId = null;
+});
+
+async function detachDebugger(): Promise<void> {
+  if (attachedTabId == null) return;
+  const target = { tabId: attachedTabId };
+  attachedTabId = null;
+  await chrome.debugger.detach(target).catch(() => {});
+}
+
+/**
+ * Send a CDP command, keeping the debugger attached across consecutive
+ * actions (a batch = one attach, not N) and detaching after 2s of quiet so
+ * Chrome's "is debugging this browser" bar doesn't linger.
+ */
+async function cdp(tabId: number, method: string, params: object): Promise<unknown> {
+  if (attachedTabId !== null && attachedTabId !== tabId) await detachDebugger();
+  if (attachedTabId === null) {
+    await chrome.debugger.attach({ tabId }, "1.3").catch((err) => {
+      // Already attached (e.g. by a previous crash) is fine; anything else isn't.
+      if (!String(err?.message ?? err).includes("Already attached")) throw err;
+    });
+    attachedTabId = tabId;
+  }
+  if (detachTimer) clearTimeout(detachTimer);
+  detachTimer = setTimeout(() => void detachDebugger(), 2000);
+  return await chrome.debugger.sendCommand({ tabId }, method, params);
+}
+
+// ── Keyboard mapping ──────────────────────────────────────────────────────────
+
+const MOD_BITS: Record<string, number> = {
+  alt: 1, option: 1,
+  ctrl: 2, control: 2,
+  meta: 4, cmd: 4, command: 4, super: 4, win: 4,
+  shift: 8,
+};
+
+interface KeyDef { key: string; code: string; keyCode: number; text?: string }
+
+const NAMED_KEYS: Record<string, KeyDef> = {
+  enter: { key: "Enter", code: "Enter", keyCode: 13, text: "\r" },
+  return: { key: "Enter", code: "Enter", keyCode: 13, text: "\r" },
+  tab: { key: "Tab", code: "Tab", keyCode: 9 },
+  escape: { key: "Escape", code: "Escape", keyCode: 27 },
+  esc: { key: "Escape", code: "Escape", keyCode: 27 },
+  backspace: { key: "Backspace", code: "Backspace", keyCode: 8 },
+  delete: { key: "Delete", code: "Delete", keyCode: 46 },
+  home: { key: "Home", code: "Home", keyCode: 36 },
+  end: { key: "End", code: "End", keyCode: 35 },
+  page_down: { key: "PageDown", code: "PageDown", keyCode: 34 },
+  pagedown: { key: "PageDown", code: "PageDown", keyCode: 34 },
+  page_up: { key: "PageUp", code: "PageUp", keyCode: 33 },
+  pageup: { key: "PageUp", code: "PageUp", keyCode: 33 },
+  up: { key: "ArrowUp", code: "ArrowUp", keyCode: 38 },
+  arrowup: { key: "ArrowUp", code: "ArrowUp", keyCode: 38 },
+  down: { key: "ArrowDown", code: "ArrowDown", keyCode: 40 },
+  arrowdown: { key: "ArrowDown", code: "ArrowDown", keyCode: 40 },
+  left: { key: "ArrowLeft", code: "ArrowLeft", keyCode: 37 },
+  arrowleft: { key: "ArrowLeft", code: "ArrowLeft", keyCode: 37 },
+  right: { key: "ArrowRight", code: "ArrowRight", keyCode: 39 },
+  arrowright: { key: "ArrowRight", code: "ArrowRight", keyCode: 39 },
+  space: { key: " ", code: "Space", keyCode: 32, text: " " },
+  minus: { key: "-", code: "Minus", keyCode: 189, text: "-" },
+  plus: { key: "+", code: "Equal", keyCode: 187, text: "+" },
+  equal: { key: "=", code: "Equal", keyCode: 187, text: "=" },
+};
+
+for (let f = 1; f <= 12; f++) {
+  NAMED_KEYS[`f${f}`] = { key: `F${f}`, code: `F${f}`, keyCode: 111 + f };
+}
+
+/** Parse an xdotool-style combo ("ctrl+shift+s", "Return") into CDP params. */
+function parseCombo(combo: string): { modifiers: number; def: KeyDef } {
+  const parts = combo.trim().split("+").map((p) => p.trim()).filter(Boolean);
+  let modifiers = 0;
+  let keyPart = parts[parts.length - 1] ?? "";
+  for (const p of parts.slice(0, -1)) {
+    const bit = MOD_BITS[p.toLowerCase()];
+    if (bit == null) throw new Error(`unknown modifier "${p}" in "${combo}"`);
+    modifiers |= bit;
+  }
+  // A combo like "ctrl+shift" (modifier as final key) — treat last as modifier press.
+  if (MOD_BITS[keyPart.toLowerCase()] != null && parts.length === 1) {
+    keyPart = keyPart.toLowerCase();
+    const names: Record<string, KeyDef> = {
+      ctrl: { key: "Control", code: "ControlLeft", keyCode: 17 },
+      control: { key: "Control", code: "ControlLeft", keyCode: 17 },
+      shift: { key: "Shift", code: "ShiftLeft", keyCode: 16 },
+      alt: { key: "Alt", code: "AltLeft", keyCode: 18 },
+      option: { key: "Alt", code: "AltLeft", keyCode: 18 },
+      meta: { key: "Meta", code: "MetaLeft", keyCode: 91 },
+      cmd: { key: "Meta", code: "MetaLeft", keyCode: 91 },
+      command: { key: "Meta", code: "MetaLeft", keyCode: 91 },
+      super: { key: "Meta", code: "MetaLeft", keyCode: 91 },
+      win: { key: "Meta", code: "MetaLeft", keyCode: 91 },
+    };
+    return { modifiers: 0, def: names[keyPart] };
+  }
+  const named = NAMED_KEYS[keyPart.toLowerCase()];
+  if (named) return { modifiers, def: named };
+  if (keyPart.length === 1) {
+    const upper = keyPart.toUpperCase();
+    const isLetter = upper >= "A" && upper <= "Z";
+    const shifted = (modifiers & 8) !== 0;
+    return {
+      modifiers,
+      def: {
+        key: shifted && isLetter ? upper : keyPart,
+        code: isLetter ? `Key${upper}` : `Digit${keyPart}`,
+        keyCode: upper.charCodeAt(0),
+        // Only printable when no ctrl/meta held (else it's a shortcut).
+        text: (modifiers & ~8) === 0 ? (shifted && isLetter ? upper : keyPart) : undefined,
+      },
+    };
+  }
+  throw new Error(`unknown key "${keyPart}" in combo "${combo}"`);
+}
+
+async function pressCombo(tabId: number, combo: string): Promise<void> {
+  const { modifiers, def } = parseCombo(combo);
+  const base = {
+    key: def.key,
+    code: def.code,
+    windowsVirtualKeyCode: def.keyCode,
+    nativeVirtualKeyCode: def.keyCode,
+    modifiers,
+  };
+  await cdp(tabId, "Input.dispatchKeyEvent", {
+    ...base,
+    type: def.text && modifiers === 0 ? "keyDown" : "rawKeyDown",
+    ...(def.text && (modifiers & ~8) === 0 ? { text: def.text } : {}),
+  });
+  await cdp(tabId, "Input.dispatchKeyEvent", { ...base, type: "keyUp" });
+}
+
+// ── Mouse primitives (coordinates arrive in screenshot-image px) ──────────────
+
+type Button = "left" | "right" | "middle";
+
+function toCss(coord: [number, number]): { x: number; y: number } {
+  return { x: Math.round(coord[0] * coordScale), y: Math.round(coord[1] * coordScale) };
+}
+
+function modsFromText(text?: string): number {
+  if (!text) return 0;
+  return text.split("+").reduce((acc, p) => acc | (MOD_BITS[p.trim().toLowerCase()] ?? 0), 0);
+}
+
+async function mouseMove(tabId: number, x: number, y: number, modifiers = 0): Promise<void> {
+  await cdp(tabId, "Input.dispatchMouseEvent", {
+    type: "mouseMoved", x, y, button: "none", clickCount: 0, modifiers,
+  });
+}
+
+async function mouseClick(
+  tabId: number, x: number, y: number,
+  button: Button, clickCount: number, modifiers = 0,
+): Promise<void> {
+  await mouseMove(tabId, x, y, modifiers);
+  const base = { x, y, button, clickCount, modifiers };
+  await cdp(tabId, "Input.dispatchMouseEvent", { ...base, type: "mousePressed" });
+  await cdp(tabId, "Input.dispatchMouseEvent", { ...base, type: "mouseReleased" });
+}
+
+async function mouseDrag(
+  tabId: number,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  modifiers = 0,
+): Promise<void> {
+  await mouseMove(tabId, from.x, from.y, modifiers);
+  await cdp(tabId, "Input.dispatchMouseEvent", {
+    type: "mousePressed", x: from.x, y: from.y, button: "left", clickCount: 1, modifiers,
+  });
+  // Intermediate moves so drag-aware UIs (selections, sliders) track properly.
+  const steps = 12;
+  for (let i = 1; i <= steps; i++) {
+    const x = Math.round(from.x + ((to.x - from.x) * i) / steps);
+    const y = Math.round(from.y + ((to.y - from.y) * i) / steps);
+    await cdp(tabId, "Input.dispatchMouseEvent", {
+      type: "mouseMoved", x, y, button: "left", clickCount: 0, modifiers,
+    });
+  }
+  await cdp(tabId, "Input.dispatchMouseEvent", {
+    type: "mouseReleased", x: to.x, y: to.y, button: "left", clickCount: 1, modifiers,
+  });
+}
+
+// ── Screenshot / zoom ─────────────────────────────────────────────────────────
+
+async function captureRaw(): Promise<{ dataUrl: string; dpr: number; tab: chrome.tabs.Tab }> {
+  const tab = await getActiveTab();
+  if (tab.windowId === undefined) throw new Error("no active window");
+  if (tab.id === undefined) throw new Error("no active tab");
+  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+    format: "jpeg",
+    quality: 70,
+  });
+  let dpr = 1;
+  try {
+    const [res] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => window.devicePixelRatio || 1,
+    });
+    if (typeof res?.result === "number" && res.result > 0) dpr = res.result;
+  } catch {
+    // restricted page — assume 1x
+  }
+  return { dataUrl, dpr, tab };
+}
+
+async function takeScreenshot(): Promise<Record<string, unknown>> {
+  const { dataUrl, dpr, tab } = await captureRaw();
+  const { base64, scale } = await downscaleShot(dataUrl, dpr);
+  coordScale = scale;
+  if (!base64) throw new Error("screenshot capture returned no image data");
+  return { mime_type: "image/jpeg", base64, url: tab.url, title: tab.title };
+}
+
+/**
+ * Zoom: crop `region` (screenshot-image px) from a FRESH raw capture at full
+ * device resolution — small toolbar text becomes readable. Output clamped to
+ * the same size limits as normal screenshots.
+ */
+async function zoomRegion(region: [number, number, number, number]): Promise<Record<string, unknown>> {
+  const [x1, y1, x2, y2] = region;
+  if (!(x2 > x1) || !(y2 > y1)) throw new Error("zoom region must be [x1,y1,x2,y2] with x2>x1, y2>y1");
+  const { dataUrl, dpr } = await captureRaw();
+  const blob = await (await fetch(dataUrl)).blob();
+  const bitmap = await createImageBitmap(blob);
+  // screenshot-image px → raw-capture px: image * coordScale = CSS; CSS * dpr = raw.
+  const f = coordScale * dpr;
+  const sx = Math.max(0, Math.round(x1 * f));
+  const sy = Math.max(0, Math.round(y1 * f));
+  const sw = Math.min(bitmap.width - sx, Math.round((x2 - x1) * f));
+  const sh = Math.min(bitmap.height - sy, Math.round((y2 - y1) * f));
+  if (sw < 4 || sh < 4) throw new Error("zoom region is outside the visible page");
+  const dims = computeShotDims(sw, sh);
+  const canvas = new OffscreenCanvas(dims.width, dims.height);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("canvas unavailable");
+  ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, dims.width, dims.height);
+  bitmap.close();
+  const outBlob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.75 });
+  const base64 = await blobToBase64(outBlob);
+  return {
+    mime_type: "image/jpeg",
+    base64,
+    note: `zoomed view of [${x1},${y1}]–[${x2},${y2}] — do NOT click using this image's coordinates; take a normal screenshot for coordinates`,
+  };
+}
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+  }
+  return btoa(binary);
+}
+
+// ── The computer action executor ──────────────────────────────────────────────
+
+interface ComputerInput {
+  action?: string;
+  coordinate?: [number, number];
+  start_coordinate?: [number, number];
+  text?: string;
+  scroll_direction?: "up" | "down" | "left" | "right";
+  scroll_amount?: number;
+  duration?: number;
+  region?: [number, number, number, number];
+}
+
+function requireCoord(input: ComputerInput): [number, number] {
+  const c = input.coordinate;
+  if (!Array.isArray(c) || c.length !== 2 || typeof c[0] !== "number" || typeof c[1] !== "number") {
+    throw new Error(`action "${input.action}" requires coordinate: [x, y]`);
+  }
+  return c as [number, number];
+}
+
+async function activeTabId(): Promise<number> {
+  const tab = await getActiveTab();
+  if (tab.id === undefined) throw new Error("no active tab");
+  return tab.id;
+}
+
+async function executeComputerAction(input: ComputerInput): Promise<unknown> {
+  const action = input.action ?? "";
+  switch (action) {
+    case "screenshot":
+      return await takeScreenshot();
+
+    case "zoom": {
+      if (!Array.isArray(input.region) || input.region.length !== 4) {
+        throw new Error("zoom requires region: [x1, y1, x2, y2]");
+      }
+      return await zoomRegion(input.region as [number, number, number, number]);
+    }
+
+    case "left_click":
+    case "right_click":
+    case "middle_click":
+    case "double_click":
+    case "triple_click": {
+      const c = requireCoord(input);
+      const { x, y } = toCss(c);
+      lastPos = { x: c[0], y: c[1] };
+      const button: Button =
+        action === "right_click" ? "right" : action === "middle_click" ? "middle" : "left";
+      const clicks = action === "double_click" ? 2 : action === "triple_click" ? 3 : 1;
+      const tabId = await activeTabId();
+      if (clicks > 1) {
+        // Chrome needs escalating clickCount presses for dbl/triple detection.
+        await mouseMove(tabId, x, y, modsFromText(input.text));
+        for (let i = 1; i <= clicks; i++) {
+          const base = { x, y, button, clickCount: i, modifiers: modsFromText(input.text) };
+          await cdp(tabId, "Input.dispatchMouseEvent", { ...base, type: "mousePressed" });
+          await cdp(tabId, "Input.dispatchMouseEvent", { ...base, type: "mouseReleased" });
+        }
+      } else {
+        await mouseClick(tabId, x, y, button, 1, modsFromText(input.text));
+      }
+      return { ok: true, action, at: c };
+    }
+
+    case "mouse_move": {
+      const c = requireCoord(input);
+      const { x, y } = toCss(c);
+      lastPos = { x: c[0], y: c[1] };
+      await mouseMove(await activeTabId(), x, y);
+      return { ok: true, action, at: c };
+    }
+
+    case "left_click_drag": {
+      const start = input.start_coordinate;
+      if (!Array.isArray(start) || start.length !== 2) {
+        throw new Error("left_click_drag requires start_coordinate: [x, y]");
+      }
+      const end = requireCoord(input);
+      lastPos = { x: end[0], y: end[1] };
+      await mouseDrag(
+        await activeTabId(),
+        toCss(start as [number, number]),
+        toCss(end),
+        modsFromText(input.text),
+      );
+      return { ok: true, action, from: start, to: end };
+    }
+
+    case "left_mouse_down": {
+      const c = input.coordinate ? requireCoord(input) : ([lastPos.x, lastPos.y] as [number, number]);
+      const { x, y } = toCss(c);
+      lastPos = { x: c[0], y: c[1] };
+      const tabId = await activeTabId();
+      await mouseMove(tabId, x, y);
+      await cdp(tabId, "Input.dispatchMouseEvent", {
+        type: "mousePressed", x, y, button: "left", clickCount: 1, modifiers: 0,
+      });
+      return { ok: true, action, at: c };
+    }
+
+    case "left_mouse_up": {
+      const c = input.coordinate ? requireCoord(input) : ([lastPos.x, lastPos.y] as [number, number]);
+      const { x, y } = toCss(c);
+      lastPos = { x: c[0], y: c[1] };
+      await cdp(await activeTabId(), "Input.dispatchMouseEvent", {
+        type: "mouseReleased", x, y, button: "left", clickCount: 1, modifiers: 0,
+      });
+      return { ok: true, action, at: c };
+    }
+
+    case "type": {
+      if (typeof input.text !== "string" || input.text.length === 0) {
+        throw new Error("type requires text");
+      }
+      await cdp(await activeTabId(), "Input.insertText", { text: input.text });
+      return { ok: true, action, length: input.text.length };
+    }
+
+    case "key": {
+      if (typeof input.text !== "string" || !input.text.trim()) {
+        throw new Error('key requires text, e.g. "Return" or "ctrl+s"');
+      }
+      await pressCombo(await activeTabId(), input.text);
+      return { ok: true, action, key: input.text };
+    }
+
+    case "hold_key": {
+      if (typeof input.text !== "string" || !input.text.trim()) {
+        throw new Error("hold_key requires text");
+      }
+      const seconds = Math.min(Math.max(input.duration ?? 1, 0.1), 10);
+      const { modifiers, def } = parseCombo(input.text);
+      const tabId = await activeTabId();
+      const base = {
+        key: def.key, code: def.code,
+        windowsVirtualKeyCode: def.keyCode, nativeVirtualKeyCode: def.keyCode, modifiers,
+      };
+      await cdp(tabId, "Input.dispatchKeyEvent", { ...base, type: "rawKeyDown" });
+      await new Promise((r) => setTimeout(r, seconds * 1000));
+      await cdp(tabId, "Input.dispatchKeyEvent", { ...base, type: "keyUp" });
+      return { ok: true, action, held_s: seconds };
+    }
+
+    case "scroll": {
+      const c = requireCoord(input);
+      const { x, y } = toCss(c);
+      const amount = Math.min(Math.max(input.scroll_amount ?? 3, 1), 30);
+      const dir = input.scroll_direction ?? "down";
+      // DOM wheel semantics: positive deltaY scrolls the page down.
+      const deltaY = dir === "down" ? amount * 100 : dir === "up" ? -amount * 100 : 0;
+      const deltaX = dir === "right" ? amount * 100 : dir === "left" ? -amount * 100 : 0;
+      await cdp(await activeTabId(), "Input.dispatchMouseEvent", {
+        type: "mouseWheel", x, y, deltaX, deltaY,
+        button: "none", clickCount: 0, modifiers: modsFromText(input.text),
+      });
+      return { ok: true, action, direction: dir, amount };
+    }
+
+    case "wait": {
+      const seconds = Math.min(Math.max(input.duration ?? 1, 0.1), 10);
+      await new Promise((r) => setTimeout(r, seconds * 1000));
+      return { ok: true, action, waited_s: seconds };
+    }
+
+    case "cursor_position":
+      return { ok: true, action, position: [lastPos.x, lastPos.y] };
+
+    default:
+      throw new Error(`unsupported computer action "${action}"`);
+  }
+}
+
+// ── Tool handlers ─────────────────────────────────────────────────────────────
+
+const HANDLERS: Record<string, ToolHandler> = {
+  async computer(input: ComputerInput) {
+    return await executeComputerAction(input ?? {});
+  },
+
+  /**
+   * Run several computer actions in one round trip. Stops on the first error;
+   * always finishes with a fresh screenshot so the model sees the result.
+   */
+  async batch_actions({ actions }: { actions?: ComputerInput[] }) {
+    if (!Array.isArray(actions) || actions.length === 0) {
+      throw new Error("batch_actions requires actions: [{action: ...}, ...]");
+    }
+    if (actions.length > 20) throw new Error("batch_actions is limited to 20 steps");
+
+    let completed = 0;
+    let errorMsg: string | null = null;
+    for (const step of actions) {
+      // Screenshots mid-batch are pointless (the model can't see them until
+      // the batch returns) — skip them; one is appended at the end anyway.
+      if (step?.action === "screenshot") { completed++; continue; }
+      try {
+        await executeComputerAction(step ?? {});
+        completed++;
+        await new Promise((r) => setTimeout(r, 150));
+      } catch (err) {
+        errorMsg = `step ${completed + 1} (${step?.action}) failed: ${err instanceof Error ? err.message : String(err)}`;
+        break;
+      }
+    }
+    await new Promise((r) => setTimeout(r, 350));
+    const shot = await takeScreenshot().catch(() => null);
+    return {
+      ...(shot ?? {}),
+      note: errorMsg
+        ? `completed ${completed}/${actions.length} steps, then: ${errorMsg}. Screenshot shows the state after the last successful step.`
+        : `completed ${completed}/${actions.length} steps. Screenshot shows the result.`,
+    };
+  },
+
   async read_page() {
     const snapshot = await readActivePage();
     const json = JSON.stringify(snapshot);
@@ -82,19 +610,6 @@ const HANDLERS: Record<EvaToolName, ToolHandler> = {
     return await typeInActivePage(element_id, text, !append);
   },
 
-  async scroll({
-    direction,
-    amount_px,
-  }: {
-    direction: "up" | "down";
-    amount_px?: number;
-  }) {
-    if (direction !== "up" && direction !== "down") {
-      throw new Error(`direction must be 'up' or 'down', got '${direction}'`);
-    }
-    return await scrollActivePage(direction, amount_px);
-  },
-
   async scroll_to({ element_id }: { element_id: string }) {
     requireString(element_id, "element_id");
     return await scrollActivePageTo(element_id);
@@ -109,42 +624,6 @@ const HANDLERS: Record<EvaToolName, ToolHandler> = {
     if (tab.id === undefined) throw new Error("active tab has no id");
     const tabId = tab.id;
     return await navigateAndWait(tabId, url);
-  },
-
-  async screenshot() {
-    const tab = await getActiveTab();
-    if (tab.windowId === undefined) throw new Error("no active window");
-    if (tab.id === undefined) throw new Error("no active tab");
-
-    // JPEG at q70 is ~5x smaller than PNG and still crisp enough to read UI.
-    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-      format: "jpeg",
-      quality: 70,
-    });
-
-    // How many CSS px does the captured (device-px) image represent? On retina
-    // dpr=2, so a 2560px-wide capture is a 1280px CSS viewport. We need that to
-    // map the model's click coordinates back to CSS px for CDP.
-    let dpr = 1;
-    try {
-      const [res] = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => window.devicePixelRatio || 1,
-      });
-      if (typeof res?.result === "number" && res.result > 0) dpr = res.result;
-    } catch {
-      // restricted page — assume 1x
-    }
-
-    const { base64, scale } = await downscaleShot(dataUrl, dpr);
-    coordScale = scale;
-    if (!base64) throw new Error("screenshot capture returned no image data");
-    return {
-      mime_type: "image/jpeg",
-      base64,
-      url: tab.url,
-      title: tab.title,
-    };
   },
 
   async form_input({
@@ -193,54 +672,9 @@ const HANDLERS: Record<EvaToolName, ToolHandler> = {
     await chrome.tabs.remove(tab_id);
     return { closed: tab_id };
   },
-
-  async click_at_coordinate({ x, y }: { x: number; y: number }) {
-    if (typeof x !== "number" || typeof y !== "number") {
-      throw new Error("x and y must be numbers");
-    }
-    const tab = await getActiveTab();
-    if (tab.id === undefined) throw new Error("no active tab");
-    const cx = Math.round(x * coordScale);
-    const cy = Math.round(y * coordScale);
-    await cdpMouseClick(tab.id, cx, cy, 1);
-    return { clicked: { x, y } };
-  },
-
-  async double_click_at_coordinate({ x, y }: { x: number; y: number }) {
-    if (typeof x !== "number" || typeof y !== "number") {
-      throw new Error("x and y must be numbers");
-    }
-    const tab = await getActiveTab();
-    if (tab.id === undefined) throw new Error("no active tab");
-    const cx = Math.round(x * coordScale);
-    const cy = Math.round(y * coordScale);
-    await cdpMouseClick(tab.id, cx, cy, 2);
-    return { double_clicked: { x, y } };
-  },
-
-  async type_at_cursor({ text }: { text: string }) {
-    if (typeof text !== "string" || !text) throw new Error("text must be a non-empty string");
-    const tab = await getActiveTab();
-    if (tab.id === undefined) throw new Error("no active tab");
-    await cdpInsertText(tab.id, text);
-    return { typed: text };
-  },
-
-  async key_press({ key, modifiers }: { key: string; modifiers?: string[] }) {
-    if (typeof key !== "string" || !key) throw new Error("key must be a non-empty string");
-    const tab = await getActiveTab();
-    if (tab.id === undefined) throw new Error("no active tab");
-    const mods = Array.isArray(modifiers) ? modifiers : [];
-    await cdpKeyPress(tab.id, key, mods);
-    return { pressed: key };
-  },
-
-  async wait({ ms }: { ms?: number }) {
-    const delay = Math.min(Math.max(ms ?? 800, 100), 5000);
-    await new Promise((r) => setTimeout(r, delay));
-    return { waited_ms: delay };
-  },
 };
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
 
 /**
  * Downscale a captured (device-pixel) screenshot so the image the model sees
@@ -259,93 +693,21 @@ async function downscaleShot(
     // CSS dimensions of the captured area.
     const cssW = bitmap.width / dpr;
     const cssH = bitmap.height / dpr;
+    const dims = computeShotDims(cssW, cssH);
 
-    // Target: CSS size, clamped under BOTH the long-edge and total-area limits.
-    const longEdge = Math.max(cssW, cssH);
-    const clampEdge = longEdge > MAX_SHOT_EDGE ? MAX_SHOT_EDGE / longEdge : 1;
-    const area = cssW * cssH;
-    const clampArea = area > MAX_SHOT_AREA ? Math.sqrt(MAX_SHOT_AREA / area) : 1;
-    const clamp = Math.min(clampEdge, clampArea);
-    const targetW = Math.max(1, Math.round(cssW * clamp));
-    const targetH = Math.max(1, Math.round(cssH * clamp));
-
-    const canvas = new OffscreenCanvas(targetW, targetH);
+    const canvas = new OffscreenCanvas(dims.width, dims.height);
     const ctx = canvas.getContext("2d");
     if (!ctx) return { base64: stripPrefix(dataUrl), scale: 1 };
-    ctx.drawImage(bitmap, 0, 0, targetW, targetH);
+    ctx.drawImage(bitmap, 0, 0, dims.width, dims.height);
     bitmap.close();
 
     const outBlob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.7 });
-    const buf = await outBlob.arrayBuffer();
-    const bytes = new Uint8Array(buf);
-    let binary = "";
-    const chunk = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunk) {
-      binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
-    }
+    const base64 = await blobToBase64(outBlob);
     // image px → CSS px factor: one image px covers (cssW/targetW) CSS px.
-    const scale = cssW / targetW;
-    return { base64: btoa(binary), scale };
+    return { base64, scale: cssW / dims.width };
   } catch {
     // Fallback: send as-is, best-effort scale from dpr.
     return { base64: stripPrefix(dataUrl), scale: dpr > 0 ? 1 / dpr : 1 };
-  }
-}
-
-async function cdpMouseClick(tabId: number, x: number, y: number, clickCount = 1): Promise<void> {
-  const target = { tabId };
-  await chrome.debugger.attach(target, "1.3").catch(() => {});
-  try {
-    // Move first so hover states trigger correctly.
-    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
-      type: "mouseMoved", x, y, button: "none", clickCount: 0, modifiers: 0,
-    });
-    const base = { x, y, button: "left" as const, clickCount, modifiers: 0 };
-    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { ...base, type: "mousePressed" });
-    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { ...base, type: "mouseReleased" });
-  } finally {
-    await chrome.debugger.detach(target).catch(() => {});
-  }
-}
-
-async function cdpInsertText(tabId: number, text: string): Promise<void> {
-  const target = { tabId };
-  await chrome.debugger.attach(target, "1.3").catch(() => {});
-  try {
-    await chrome.debugger.sendCommand(target, "Input.insertText", { text });
-  } finally {
-    await chrome.debugger.detach(target).catch(() => {});
-  }
-}
-
-const KEY_CODE_MAP: Record<string, { keyCode: number; code: string }> = {
-  Enter: { keyCode: 13, code: "Enter" },
-  Tab: { keyCode: 9, code: "Tab" },
-  Escape: { keyCode: 27, code: "Escape" },
-  Backspace: { keyCode: 8, code: "Backspace" },
-  ArrowUp: { keyCode: 38, code: "ArrowUp" },
-  ArrowDown: { keyCode: 40, code: "ArrowDown" },
-  ArrowLeft: { keyCode: 37, code: "ArrowLeft" },
-  ArrowRight: { keyCode: 39, code: "ArrowRight" },
-};
-
-async function cdpKeyPress(tabId: number, key: string, modifiers: string[]): Promise<void> {
-  const target = { tabId };
-  const modifierBits = modifiers.reduce((acc, m) => {
-    if (m === "ctrl" || m === "control") return acc | 2;
-    if (m === "shift") return acc | 8;
-    if (m === "alt") return acc | 1;
-    if (m === "meta" || m === "cmd") return acc | 4;
-    return acc;
-  }, 0);
-  const extra = KEY_CODE_MAP[key] ?? { keyCode: key.charCodeAt(0), code: `Key${key.toUpperCase()}` };
-  await chrome.debugger.attach(target, "1.3").catch(() => {});
-  try {
-    const base = { key, ...extra, modifiers: modifierBits };
-    await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", { ...base, type: "keyDown" });
-    await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", { ...base, type: "keyUp" });
-  } finally {
-    await chrome.debugger.detach(target).catch(() => {});
   }
 }
 
@@ -393,7 +755,7 @@ export async function runTool(
   name: string,
   input: unknown,
 ): Promise<{ output: string; isError: boolean }> {
-  const handler = (HANDLERS as Record<string, ToolHandler | undefined>)[name];
+  const handler = HANDLERS[name];
   if (!handler) {
     return {
       output: JSON.stringify({

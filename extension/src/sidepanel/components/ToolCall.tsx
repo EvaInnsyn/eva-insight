@@ -10,7 +10,7 @@ export function ToolCall({ call }: Props) {
   const isRunning = !call.finishedAt;
   const isError = call.isError === true;
 
-  const label = labelFor(call.name);
+  const label = labelFor(call.name, call.input);
   const summary = summaryFor(call);
 
   let statusClass = "eva-tool-status-done";
@@ -55,7 +55,35 @@ export function ToolCall({ call }: Props) {
   );
 }
 
-function labelFor(name: string): string {
+const COMPUTER_ACTION_LABELS: Record<string, string> = {
+  screenshot: "Looking at screen",
+  zoom: "Looking closer",
+  left_click: "Clicking",
+  right_click: "Right-clicking",
+  middle_click: "Clicking",
+  double_click: "Double-clicking",
+  triple_click: "Selecting line",
+  left_click_drag: "Dragging",
+  left_mouse_down: "Pressing mouse",
+  left_mouse_up: "Releasing mouse",
+  mouse_move: "Moving cursor",
+  type: "Typing",
+  key: "Pressing key",
+  hold_key: "Holding key",
+  scroll: "Scrolling",
+  wait: "Waiting",
+  cursor_position: "Checking cursor",
+};
+
+function labelFor(name: string, input?: unknown): string {
+  if (name === "computer") {
+    const action = (input as { action?: string } | null)?.action ?? "";
+    return COMPUTER_ACTION_LABELS[action] ?? "Using the page";
+  }
+  if (name === "batch_actions") {
+    const n = (input as { actions?: unknown[] } | null)?.actions?.length ?? 0;
+    return n > 0 ? `${n} quick steps` : "Quick steps";
+  }
   switch (name) {
     case "read_page": return "Reading page";
     case "get_active_tab": return "Checking tab";
@@ -81,6 +109,8 @@ function labelFor(name: string): string {
 
 function iconFor(name: string): string {
   switch (name) {
+    case "computer": return "🖱";
+    case "batch_actions": return "⚡";
     case "read_page": return "📄";
     case "get_active_tab":
     case "tabs_list":
@@ -106,6 +136,14 @@ function iconFor(name: string): string {
 function summaryFor(call: ChatToolCall): string | null {
   const input = call.input as Record<string, unknown> | null;
   if (!input || typeof input !== "object") return null;
+  if (call.name === "computer") {
+    const c = input.coordinate as [number, number] | undefined;
+    if (typeof input.text === "string" && input.text) {
+      return input.text.length > 28 ? `"${input.text.slice(0, 27)}…"` : `"${input.text}"`;
+    }
+    if (Array.isArray(c)) return `${Math.round(c[0])}, ${Math.round(c[1])}`;
+    return null;
+  }
   switch (call.name) {
     case "click":
     case "scroll_to":

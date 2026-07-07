@@ -31,6 +31,8 @@ const ChatRequestSchema = z.object({
   thinking: z.any().optional(),
   /** Passed through. Phase 4 populates this. */
   tools: z.array(z.any()).optional(),
+  /** Anthropic beta flags (e.g. computer-use) — forwarded as a header. */
+  betas: z.array(z.string().max(64)).max(8).optional(),
   /** Passed through. Caller can set effort/format/task_budget. */
   output_config: z.any().optional(),
   /** Optional metadata (e.g. user_id) — forwarded as-is. */
@@ -114,7 +116,12 @@ chatRoute.post("/", async (c) => {
           ...(req.metadata ? { metadata: req.metadata } : {}),
           messages: req.messages as Anthropic.MessageParam[],
         },
-        { signal: abort.signal },
+        {
+          signal: abort.signal,
+          ...(req.betas?.length
+            ? { headers: { "anthropic-beta": req.betas.join(",") } }
+            : {}),
+        },
       );
 
       let inputTokens = 0;

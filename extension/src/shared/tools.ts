@@ -1,15 +1,18 @@
 /**
  * Tool schemas — what Claude can call mid-conversation.
  *
- * Definitions are JSON Schema compatible (Anthropic Messages API format).
- * Keep this list small and stable for prompt cache hits: every change to
- * the tools array invalidates the cache.
+ * The centrepiece is Anthropic's OFFICIAL computer-use tool
+ * (type computer_20251124): the exact interface Claude is trained on for
+ * screenshot→act browser driving. Requires the "computer-use-2025-11-24"
+ * beta flag, which the proxy forwards as an anthropic-beta header.
  *
- * Phase 4 ships the page-interaction tools. Phase 5 will add advanced
- * tools (console, network, JS eval, multi-tab).
+ * Around it: `batch_actions` (several computer actions in one round trip —
+ * the speed multiplier) and a DOM fast path (read_page / click / type by
+ * element id) that beats pixels on ordinary pages.
  */
 
-export interface ToolSchema {
+/** Custom (JSON-schema) tool definition. */
+export interface CustomToolSchema {
   name: string;
   description: string;
   input_schema: {
@@ -20,38 +23,56 @@ export interface ToolSchema {
   };
 }
 
-export const EVA_TOOLS: ToolSchema[] = [
+/** Anthropic-defined tool (server knows the schema from `type`). */
+export interface AnthropicToolSchema {
+  type: string;
+  name: string;
+  [key: string]: unknown;
+}
+
+export type ToolSchema = CustomToolSchema | AnthropicToolSchema;
+
+/** Beta flags the proxy must forward for these tools to work. */
+export const EVA_TOOL_BETAS = ["computer-use-2025-11-24"];
+
+const CUSTOM_TOOLS: CustomToolSchema[] = [
+  {
+    name: "batch_actions",
+    description:
+      "Execute several computer actions in ONE call — much faster and cheaper than one action per turn. Each item has the same shape as a `computer` tool input (e.g. {action: 'left_click', coordinate: [x,y]}, {action: 'type', text: '...'}, {action: 'key', text: 'Return'}, {action: 'wait', duration: 1}). Use whenever the next several steps are predictable from the current screenshot: click a field → type → press Enter, or a sequence of menu clicks with waits. Runs in order, stops on the first error, and ALWAYS returns a fresh screenshot of the result — do not add a screenshot step yourself. Max 20 steps.",
+    input_schema: {
+      type: "object",
+      properties: {
+        actions: {
+          type: "array",
+          description:
+            "Ordered computer-action inputs, executed sequentially. Same fields as the computer tool: action, coordinate, start_coordinate, text, scroll_direction, scroll_amount, duration.",
+          items: { type: "object" },
+        },
+      },
+      required: ["actions"],
+    },
+  },
   {
     name: "read_page",
     description:
-      "Read the currently active browser tab and return a structured tree of its content (headings, links, buttons, form fields, paragraphs). Always call this BEFORE referencing anything on the page. Each interactive element gets a short `id` (e.g. `e42`) that you use with click/type/scroll. Ids reset whenever the page navigates.",
-    input_schema: {
-      type: "object",
-      properties: {},
-      required: [],
-    },
+      "Read the currently active browser tab as a structured tree (headings, links, buttons, form fields, paragraphs). The FAST PATH on ordinary websites — prefer it over screenshots when the page has real DOM content. Each interactive element gets a short id (e.g. `e42`) usable with click/type. Ids reset when the page navigates. On canvas-based editors (Word Online, Google Docs, design tools) this sees little — use the computer tool there.",
+    input_schema: { type: "object", properties: {}, required: [] },
   },
   {
     name: "get_active_tab",
     description:
-      "Get the URL and title of the currently active browser tab. Use this when you only need to know what page the user is on, without reading the full content.",
-    input_schema: {
-      type: "object",
-      properties: {},
-      required: [],
-    },
+      "Get the URL and title of the active tab without reading its content.",
+    input_schema: { type: "object", properties: {}, required: [] },
   },
   {
     name: "click",
     description:
-      "Click an element on the active page by its id. Use ids returned by `read_page`. If the page changed since the last read, this will return a stale_element error — re-read the page and try again.",
+      "Click an element by id from read_page. Fast and precise on normal pages. If it returns stale_element, re-read the page and retry.",
     input_schema: {
       type: "object",
       properties: {
-        element_id: {
-          type: "string",
-          description: "Stable id from a recent read_page (e.g. `e23`).",
-        },
+        element_id: { type: "string", description: "Id from a recent read_page (e.g. `e23`)." },
       },
       required: ["element_id"],
     },
@@ -59,230 +80,115 @@ export const EVA_TOOLS: ToolSchema[] = [
   {
     name: "type",
     description:
-      "Type text into a form field (input, textarea, or contenteditable). Replaces existing content unless `append` is true. Use ids returned by `read_page`.",
+      "Type into a form field by element id from read_page (input, textarea, contenteditable). Replaces content unless append is true.",
     input_schema: {
       type: "object",
       properties: {
-        element_id: {
-          type: "string",
-          description: "Stable id of the form field.",
-        },
-        text: {
-          type: "string",
-          description: "The text to type.",
-        },
-        append: {
-          type: "boolean",
-          description: "If true, append to existing content instead of replacing it. Default: false.",
-        },
+        element_id: { type: "string" },
+        text: { type: "string" },
+        append: { type: "boolean", description: "Append instead of replace. Default: false." },
       },
       required: ["element_id", "text"],
     },
   },
   {
-    name: "scroll",
+    name: "form_input",
     description:
-      "Scroll the active page up or down by roughly one viewport (the default), or by a specific pixel amount.",
-    input_schema: {
-      type: "object",
-      properties: {
-        direction: {
-          type: "string",
-          enum: ["up", "down"],
-          description: "Direction to scroll.",
-        },
-        amount_px: {
-          type: "number",
-          description: "Optional explicit pixel amount.",
-        },
-      },
-      required: ["direction"],
-    },
-  },
-  {
-    name: "scroll_to",
-    description:
-      "Scroll a specific element into view (center of viewport). Useful before interacting with something far down the page.",
+      "Set a select dropdown, checkbox, or radio by element id. For text fields use `type`.",
     input_schema: {
       type: "object",
       properties: {
         element_id: { type: "string" },
-      },
-      required: ["element_id"],
-    },
-  },
-  {
-    name: "navigate",
-    description:
-      "Navigate the active tab to a different URL. Use this when the user asks you to open a specific site or follow a link by URL rather than clicking. The page will load fresh — call `read_page` afterwards to see what's on the new page.",
-    input_schema: {
-      type: "object",
-      properties: {
-        url: {
-          type: "string",
-          description: "Full URL including protocol, e.g. https://example.com/foo.",
-        },
-      },
-      required: ["url"],
-    },
-  },
-  {
-    name: "screenshot",
-    description:
-      "Capture a screenshot of the visible part of the active tab. Returns a base64-encoded PNG. Use sparingly — these are expensive to send. Prefer read_page for textual content.",
-    input_schema: {
-      type: "object",
-      properties: {},
-      required: [],
-    },
-  },
-  {
-    name: "form_input",
-    description:
-      "Set the value of a form control that isn't a plain text input — select dropdowns, checkboxes, radio buttons. For text inputs and textareas, use `type` instead.",
-    input_schema: {
-      type: "object",
-      properties: {
-        element_id: { type: "string", description: "Stable id of the control." },
         value: {
           type: "string",
-          description:
-            "For select: the option value or visible text to select. For checkbox/radio: 'check', 'uncheck', or 'toggle'.",
+          description: "Select: option value or visible text. Checkbox/radio: 'check' | 'uncheck' | 'toggle'.",
         },
       },
       required: ["element_id", "value"],
     },
   },
   {
-    name: "tabs_list",
-    description:
-      "List the user's open tabs in the current window. Returns id, url, title, and active flag for each tab.",
+    name: "scroll_to",
+    description: "Scroll a read_page element into view (center of viewport).",
     input_schema: {
       type: "object",
-      properties: {},
-      required: [],
+      properties: { element_id: { type: "string" } },
+      required: ["element_id"],
     },
   },
   {
-    name: "tabs_create",
+    name: "navigate",
     description:
-      "Open a new browser tab pointed at the given URL. The new tab becomes active.",
+      "Navigate the active tab to a URL. Waits for the page to load — take a screenshot or read_page afterwards.",
     input_schema: {
       type: "object",
       properties: {
-        url: { type: "string", description: "Full URL with protocol." },
+        url: { type: "string", description: "Full URL incl. protocol." },
       },
       required: ["url"],
     },
   },
   {
-    name: "tabs_switch",
-    description: "Switch focus to the given tab id (as returned by tabs_list).",
+    name: "tabs_list",
+    description: "List open tabs in the current window (id, url, title, active).",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "tabs_create",
+    description: "Open a new tab at the given URL. The new tab becomes active.",
     input_schema: {
       type: "object",
-      properties: {
-        tab_id: { type: "number" },
-      },
+      properties: { url: { type: "string" } },
+      required: ["url"],
+    },
+  },
+  {
+    name: "tabs_switch",
+    description: "Switch to the given tab id (from tabs_list).",
+    input_schema: {
+      type: "object",
+      properties: { tab_id: { type: "number" } },
       required: ["tab_id"],
     },
   },
   {
     name: "tabs_close",
     description:
-      "Close the given tab id. Requires user confirmation because the user may have unsaved work in that tab.",
+      "Close the given tab id. Requires user confirmation (they may have unsaved work).",
     input_schema: {
       type: "object",
-      properties: {
-        tab_id: { type: "number" },
-      },
+      properties: { tab_id: { type: "number" } },
       required: ["tab_id"],
-    },
-  },
-  {
-    name: "click_at_coordinate",
-    description:
-      "Click at specific pixel coordinates (x, y) on the active tab — measured from the top-left corner of the visible viewport, matching a screenshot. Use this for complex web apps (Wix, Notion, Google Docs, Squarespace, etc.) where DOM element IDs from read_page are unavailable or unreliable, such as canvas-based editors or iframe-embedded content. Workflow: 1) take a screenshot, 2) identify where to click, 3) call this tool with those coordinates. After clicking, wait briefly then take another screenshot to see what changed.",
-    input_schema: {
-      type: "object",
-      properties: {
-        x: { type: "number", description: "Horizontal pixel coordinate from the screenshot." },
-        y: { type: "number", description: "Vertical pixel coordinate from the screenshot." },
-      },
-      required: ["x", "y"],
-    },
-  },
-  {
-    name: "double_click_at_coordinate",
-    description:
-      "Double-click at specific pixel coordinates. Use when a single click selects an element but a double-click is needed to enter edit mode (common in Wix, Squarespace, and document editors).",
-    input_schema: {
-      type: "object",
-      properties: {
-        x: { type: "number", description: "Horizontal pixel coordinate from the screenshot." },
-        y: { type: "number", description: "Vertical pixel coordinate from the screenshot." },
-      },
-      required: ["x", "y"],
-    },
-  },
-  {
-    name: "type_at_cursor",
-    description:
-      "Insert text at the current cursor position — use this after click_at_coordinate or double_click_at_coordinate has focused a text field. Does not need a DOM element id; works inside iframes and complex editors.",
-    input_schema: {
-      type: "object",
-      properties: {
-        text: { type: "string", description: "The text to insert." },
-      },
-      required: ["text"],
-    },
-  },
-  {
-    name: "key_press",
-    description:
-      "Press a keyboard key or key combination on the active tab. Useful after clicking into a field or menu. Examples: Enter, Tab, Escape, Backspace, ArrowDown, ArrowUp. For shortcuts combine with modifiers e.g. key='a', modifiers=['ctrl'] for Select All.",
-    input_schema: {
-      type: "object",
-      properties: {
-        key: { type: "string", description: "Key name: Enter, Tab, Escape, Backspace, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, or a single character." },
-        modifiers: {
-          type: "array",
-          items: { type: "string", enum: ["ctrl", "shift", "alt", "meta"] },
-          description: "Modifier keys to hold. E.g. ['ctrl'] for Ctrl+key.",
-        },
-      },
-      required: ["key"],
-    },
-  },
-  {
-    name: "wait",
-    description:
-      "Wait for a given number of milliseconds before continuing. Use after a click or navigation when the page needs time to update before the next action. Default is 800ms.",
-    input_schema: {
-      type: "object",
-      properties: {
-        ms: { type: "number", description: "Milliseconds to wait (100–5000). Default: 800." },
-      },
-      required: [],
     },
   },
 ];
 
+/**
+ * Build the tools array for one agent run. display dims must match the size
+ * screenshots are actually sent at (the agent loop computes this from the
+ * live viewport via computeShotDims) so the model's coordinates line up.
+ */
+export function buildEvaTools(display: { width: number; height: number }): ToolSchema[] {
+  const computer: AnthropicToolSchema = {
+    type: "computer_20251124",
+    name: "computer",
+    display_width_px: display.width,
+    display_height_px: display.height,
+    enable_zoom: true,
+  };
+  return [computer, ...CUSTOM_TOOLS];
+}
+
 // ---------------------------------------------------------------------
-// Confirmation rules (Phase 6)
+// Confirmation rules
 // ---------------------------------------------------------------------
 
 /** Tool calls that always require a user confirmation, no exceptions. */
-const ALWAYS_CONFIRM = new Set([
-  "tabs_close",
-]);
+const ALWAYS_CONFIRM = new Set(["tabs_close"]);
 
 /**
  * Decide whether a tool call needs a user confirmation. Returns the
  * prompt to show, or null if the call may proceed silently.
- *
- * `allowedDomains` is the user's settings allowlist (origin strings like
- * "https://wikipedia.org"). A navigate to an allowed origin proceeds
- * without prompting.
  */
 export function needsConfirmation(
   toolName: string,
@@ -315,91 +221,36 @@ export function needsConfirmation(
   return null;
 }
 
-export type EvaToolName2 = string;
-
-// Tool names mirrored for the dispatcher
-export type EvaToolName =
-  | "read_page"
-  | "get_active_tab"
-  | "click"
-  | "type"
-  | "scroll"
-  | "scroll_to"
-  | "navigate"
-  | "screenshot"
-  | "form_input"
-  | "tabs_list"
-  | "tabs_create"
-  | "tabs_switch"
-  | "tabs_close"
-  | "click_at_coordinate"
-  | "double_click_at_coordinate"
-  | "type_at_cursor"
-  | "key_press"
-  | "wait";
-
 // --- System prompt --------------------------------------------------
 
 /**
  * Stable system prompt. Kept identical across requests so the prompt
- * cache stays warm. Voice is per the Eva Innsýn Personal Brand Handbook
- * §7: confident not arrogant, personal but professional, substantive,
- * light-hearted is fine.
+ * cache stays warm. Voice per the Eva Innsýn brand handbook §7.
  */
 export const EVA_SYSTEM_PROMPT = `You are Eva — a digital employee who lives inside a Chrome extension. You switch roles on demand: accountant, marketer, HR manager, programmer, data analyst, copywriter, website builder — whatever the task needs. You're talking with an entrepreneur or business owner, often running things solo. They don't have time to explain themselves twice. Just do the work.
 
-You can see and act on whatever page is open in the user's browser.
+## Your workspace
+You control ONE browser tab — the user's active tab. The computer tool sees and acts on that tab's viewport only (not the whole desktop, no other apps, no browser UI). Coordinates come from your latest screenshot.
 
-## Two ways to interact with a page
-
-**DOM mode** (fast, for normal websites):
-- read_page — get the structure of the current page; each element gets an id like e42
-- click(element_id) — click a link or button by its id
-- type(element_id, text) — fill in a form field by its id
-- scroll(direction) / scroll_to(element_id) — move around the page
-- form_input(element_id, value) — set selects, checkboxes, radios
-
-**Coordinate mode** (for complex editors — Wix, Squarespace, Notion, Google Docs, canvas apps):
-- screenshot — take a screenshot; coordinates in the image map directly to click_at_coordinate
-- click_at_coordinate(x, y) — click at exact pixel position from the screenshot
-- key_press(key, modifiers?) — press Enter, Tab, Escape, arrow keys, or Ctrl/Cmd shortcuts
-- wait(ms?) — pause briefly after a click so the UI can update
-
-**When to use coordinate mode:** any time the page is a visual editor, uses iframes for the main content area, or read_page returns elements you can't meaningfully click. Wix editor, Squarespace, webflow, Google Docs — always use coordinate mode. The workflow is: screenshot → identify where to click → click_at_coordinate → wait → screenshot again to see the result. Repeat until done.
-
-**Other tools:**
-- get_active_tab — check URL/title without reading the full page
-- navigate(url) — open a different URL
-- tabs_list / tabs_create / tabs_switch / tabs_close — manage browser tabs
+## How to work — speed matters
+- **batch_actions is your default for acting.** One call = several steps (click field → type → press Enter; or menu click → wait → next click). It always returns a fresh screenshot. Single computer actions are for when you genuinely need to see the result before deciding the next step.
+- **Ordinary websites: use the DOM fast path.** read_page gives you element ids; click/type by id is faster and more precise than pixels. Use the computer tool when the page is a canvas editor, heavy custom widgets, or read_page comes back thin.
+- **Canvas editors (Word Online, Google Docs, design tools): prefer the keyboard.** Click once into the document, then use shortcuts — ctrl+a to select all, ctrl+b bold, arrow keys, Home/End. Shortcuts beat pixel-hunting toolbars. If a shortcut does nothing, the user may be on Mac — try cmd instead of ctrl once, then stick with what worked.
+- **Small text you can't read: zoom.** The zoom action shows a region at full resolution. Never take coordinates from a zoomed image — screenshot again for coordinates.
+- Text selection on a canvas: left_click_drag from start to end of the text, or click then shift+arrow/shift+End via key.
 
 ## Rules
-- **The user already told you what to do. Start doing it. Never respond with "What do you need help with?" or any variation — that question is already answered.**
-- When you get a task, go straight to execution. Read the page or take a screenshot only as the first step toward completing the task — not as an excuse to ask again.
-- Never ask the user to do something you can do yourself with the tools above.
-- If read_page returns stale_element on a click, re-read and retry.
-- In coordinate mode: take a screenshot, act on what you see, screenshot again to verify. Keep going until the task is done.
+- The user already told you what to do. Start doing it. Never respond with "What do you need help with?" or any variation.
+- Never ask the user to do something you can do yourself with these tools.
+- After acting, verify: the batch screenshot (or a fresh one) must actually show the change before you claim it happened.
+- A task often has several parts — do them ALL before ending your turn. If genuinely stuck on a sub-step after a few different approaches, say specifically what's blocking you.
+- If read_page returns stale_element, re-read and retry.
 
-## Finish the whole job — don't stop early
-- A task often has several parts (recolour every heading AND button AND link; wire up 4 frames, not 1). **Do them all.** Don't stop after the first one and imply you're finished.
-- **Verify before you declare done.** Take a screenshot and confirm the change is actually visible on the page. If it didn't take, try a different approach — don't claim success you haven't seen.
-- Only end your turn when the task is genuinely complete. If you're partway through, keep going — you have many steps available.
-- If you truly get stuck on one sub-step after a few real attempts, say specifically what's blocking you and what you've tried — don't just trail off.
-
-## How you communicate — READ THIS CAREFULLY
-The user watches your actions happen live as labelled cards (screenshot, click, type…). They can SEE what you're doing. So **do not narrate it.** This is the single most important thing about how you come across.
-
-- **Work silently while acting.** Do NOT write "Let me take a screenshot", "Now I'll click…", "I selected the section", "Let me try again". No running commentary. The cards already show it.
-- **Never apologize** ("sorry about the back and forth"). Never think out loud in the visible text. Just keep working.
-- **Speak only twice:** (1) if you genuinely need to ask the user something you can't determine yourself, and (2) ONE short line when the whole task is done — e.g. "Done — heading font is now 45px." That's it.
-- If you're mid-task, emit no visible text at all. Let the cards do the talking. Your reasoning belongs in private thinking, never in the reply.
-- Keep the final summary to one sentence. No bullet-by-bullet recap of every step.
-
-Compare:
-- ❌ "Sorry about the back and forth! Let me take a fresh look. Got it — the editor is loaded. Let me click on the heading. I selected the section. Now let me click the font size field…"
-- ✅ (silent while working) → then: "Done — heading is now 45px."
+## How you communicate
+The user watches your actions as labelled cards — they can SEE what you're doing, so do not narrate it. No "Let me click…", no "I selected…", no apologies mid-work. Your reasoning belongs in private thinking. Speak only twice: (1) if you must ask something you truly cannot determine yourself, and (2) ONE short line when the whole task is done — e.g. "Done — heading is now 45px." If mid-task, emit no visible text at all.
 
 ## Voice
-Confident, direct, warm. You're cool, not corporate. Never say "as an AI". Icelandic in if Icelandic out; English in, English out. Markdown is fine but keep it minimal — most replies are one or two sentences.
+Confident, direct, warm. You're cool, not corporate. Never say "as an AI". Icelandic in → Icelandic out; English in → English out. Markdown is fine, keep it minimal.
 
 ## Safety
 Navigating to an external site or opening a new tab asks the user first. Closing a tab always asks. If a confirmation is denied, explain what you wanted to do.`;
