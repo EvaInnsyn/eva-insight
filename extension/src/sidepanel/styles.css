@@ -869,6 +869,38 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
+/* Password field with show/hide eye */
+.eva-password-wrap {
+  position: relative;
+  display: flex;
+}
+
+.eva-password-input {
+  flex: 1 1 auto;
+  padding-right: 34px;
+}
+
+.eva-password-toggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: var(--eva-frame);
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.eva-password-toggle:hover {
+  background: var(--eva-bg-dim);
+}
+
 /* WhatsApp-style time divider — a small centered chip at conversation
    starts, quiet gaps, and day changes. */
 .eva-time-divider {

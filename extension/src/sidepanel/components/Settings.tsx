@@ -9,6 +9,54 @@ interface Props {
   onClose: () => void;
 }
 
+/** Password field with a show/hide eye — Eva's own mark doing honest work. */
+function PasswordInput({
+  value,
+  placeholder,
+  autoComplete,
+  onChange,
+}: {
+  value: string;
+  placeholder: string;
+  autoComplete: string;
+  onChange: (v: string) => void;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="eva-password-wrap">
+      <input
+        type={show ? "text" : "password"}
+        className="eva-text eva-password-input"
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        autoComplete={autoComplete}
+      />
+      <button
+        type="button"
+        className="eva-password-toggle"
+        onClick={() => setShow((v) => !v)}
+        aria-label={show ? "Fela lykilorð" : "Sýna lykilorð"}
+        title={show ? "Fela lykilorð" : "Sýna lykilorð"}
+      >
+        {show ? (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+            <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+            <line x1="1" y1="1" x2="23" y2="23" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        ) : (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        )}
+      </button>
+    </div>
+  );
+}
+
 export function Settings({ open, onClose }: Props) {
   const { settings, save } = useSettings();
   const { info: usage, error: usageError } = useUsage();
@@ -77,13 +125,11 @@ export function Settings({ open, onClose }: Props) {
                 onChange={(e) => setPfEmail(e.target.value)}
                 autoComplete="email"
               />
-              <input
-                type="password"
-                className="eva-text"
+              <PasswordInput
                 value={pfPassword}
                 placeholder="Lykilorð"
-                onChange={(e) => setPfPassword(e.target.value)}
                 autoComplete="current-password"
+                onChange={setPfPassword}
               />
               <button
                 type="button"
