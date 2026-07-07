@@ -21,7 +21,7 @@ import {
   buildEvaTools,
   needsConfirmation,
 } from "../shared/tools";
-import { getActiveTab } from "./page-bridge";
+import { bindTaskTab, getActiveTab, getTaskTab } from "./page-bridge";
 
 // Big multi-step editor tasks (recolour a whole theme, wire up several pages)
 // legitimately need many rounds. This is a runaway-loop backstop that protects
@@ -47,6 +47,7 @@ function buildToolResultContent(output: string, isError: boolean): unknown {
       url?: string;
       title?: string;
       note?: string;
+      step_results?: unknown[];
     };
     if (
       typeof parsed.mime_type === "string" &&
@@ -58,7 +59,13 @@ function buildToolResultContent(output: string, isError: boolean): unknown {
       // Anthropic guidance: text BEFORE the image improves click accuracy —
       // the model reads what happened/where it is before parsing pixels.
       const label = [parsed.title, parsed.url].filter(Boolean).join(" · ");
-      const preface = [parsed.note, label].filter(Boolean).join("\n");
+      // Mixed-batch tool steps (find/read_page/…) return data the model
+      // needs — it must ride along as text, not vanish behind the image.
+      const steps =
+        Array.isArray(parsed.step_results) && parsed.step_results.length > 0
+          ? JSON.stringify(parsed.step_results).slice(0, 14_000)
+          : "";
+      const preface = [parsed.note, steps, label].filter(Boolean).join("\n");
       if (preface) blocks.push({ type: "text", text: preface });
       blocks.push({
         type: "image",
@@ -279,6 +286,17 @@ export async function runAgentLoop(
   // changing anything — the over-verification loop signature.
   let passiveStreak = 0;
 
+  // Bind this run to the tab the user is on RIGHT NOW. From here on every
+  // tool acts on that tab, even if the user goes off to read email in
+  // another tab — Eva keeps working on hers (screenshots via CDP when it's
+  // in the background). tabs_switch/tabs_create move the binding on purpose.
+  try {
+    const startTab = await getActiveTab();
+    bindTaskTab(startTab.id ?? null);
+  } catch {
+    bindTaskTab(null); // no usable tab yet — first tool call rebinds
+  }
+
   // Declare the computer tool's display size from the live viewport so the
   // model's coordinates match the screenshots exactly. Once per run.
   const display = await probeDisplayDims();
@@ -330,10 +348,11 @@ export async function runAgentLoop(
     }
     messages.push({ role: "assistant", content: assistantBlocks });
 
-    // Get current active tab origin for navigation policy
+    // Navigation policy origin comes from the TASK tab — the page Eva is
+    // actually on — never from whatever tab the user happens to be viewing.
     let activeOrigin: string | undefined;
     try {
-      const tab = await getActiveTab();
+      const tab = await getTaskTab();
       if (tab.url) activeOrigin = new URL(tab.url).origin;
     } catch {
       // not blocking — needsConfirmation will fall back to prompting
@@ -425,6 +444,7 @@ export async function runAgentLoop(
   // Drop the CDP session promptly so Chrome's debugger bar clears when Eva
   // finishes instead of lingering for the idle timeout.
   setToolAuthContext(null);
+  bindTaskTab(null);
   await releaseDebugger().catch(() => {});
 
   return { info: lastInfo, messages, paused };

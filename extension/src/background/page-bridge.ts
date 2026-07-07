@@ -68,6 +68,49 @@ export async function getActiveTab(): Promise<chrome.tabs.Tab> {
   return tab;
 }
 
+// ── Task-tab binding ─────────────────────────────────────────────────────────
+// An agent run is bound to ONE tab — the tab that was active when the task
+// started. The user is free to look at other tabs (or other windows) while
+// Eva works; every tool keeps operating on the bound tab instead of silently
+// following the user's focus. Claude-in-Chrome behaves the same way.
+
+let taskTabId: number | null = null;
+
+/** Bind (or clear) the tab this agent run operates on. */
+export function bindTaskTab(tabId: number | null): void {
+  taskTabId = tabId;
+}
+
+export function boundTaskTabId(): number | null {
+  return taskTabId;
+}
+
+/**
+ * The tab all tools act on: the bound task tab while it's alive, otherwise
+ * the active tab (which then becomes the new binding). Throws on protected
+ * URLs just like getActiveTab.
+ */
+export async function getTaskTab(): Promise<chrome.tabs.Tab> {
+  if (taskTabId !== null) {
+    try {
+      const tab = await chrome.tabs.get(taskTabId);
+      if (tab.id !== undefined) {
+        if (tab.url && PROTECTED_URL_RE.test(tab.url)) {
+          throw new ProtectedTabError(tab.url);
+        }
+        return tab;
+      }
+    } catch (err) {
+      if (err instanceof ProtectedTabError) throw err;
+      // Task tab was closed — fall through and rebind to the active tab.
+      taskTabId = null;
+    }
+  }
+  const tab = await getActiveTab();
+  if (tab.id !== undefined) taskTabId = tab.id;
+  return tab;
+}
+
 /**
  * Inject the main content script into a tab on demand. Needed when the tab was
  * already open before the extension loaded (or was just updated) — the declared
@@ -120,68 +163,72 @@ export async function send<T = unknown>(
   return raw.result;
 }
 
-// Convenience wrappers used by debug routes (and by Phase 4 tool dispatch).
+// Convenience wrappers used by the tool dispatcher. Every wrapper accepts an
+// optional explicit tabId — the agent loop binds work to ONE task tab, so
+// tools must not silently follow the user's focus mid-run.
 
-export async function readActivePage(): Promise<PageSnapshot> {
-  const tab = await getActiveTab();
-  return await send<PageSnapshot>(tab.id!, { type: "page/read" });
+async function resolveTabId(tabId?: number): Promise<number> {
+  if (tabId !== undefined) return tabId;
+  const tab = await getTaskTab();
+  return tab.id!;
+}
+
+export async function readActivePage(tabId?: number): Promise<PageSnapshot> {
+  return await send<PageSnapshot>(await resolveTabId(tabId), { type: "page/read" });
 }
 
 export async function clickInActivePage(
   elementId: string,
+  tabId?: number,
 ): Promise<{ id: string; tag: string }> {
-  const tab = await getActiveTab();
-  return await send(tab.id!, { type: "page/click", elementId });
+  return await send(await resolveTabId(tabId), { type: "page/click", elementId });
 }
 
 export async function typeInActivePage(
   elementId: string,
   text: string,
   replace = true,
+  tabId?: number,
 ): Promise<{ id: string; tag: string; length: number }> {
-  const tab = await getActiveTab();
-  return await send(tab.id!, { type: "page/type", elementId, text, replace });
+  return await send(await resolveTabId(tabId), { type: "page/type", elementId, text, replace });
 }
 
 export async function scrollActivePage(
   direction: "up" | "down",
   amount?: number,
+  tabId?: number,
 ): Promise<{ x: number; y: number }> {
-  const tab = await getActiveTab();
-  return await send(tab.id!, { type: "page/scroll", direction, amount });
+  return await send(await resolveTabId(tabId), { type: "page/scroll", direction, amount });
 }
 
 export async function scrollActivePageTo(
   elementId: string,
+  tabId?: number,
 ): Promise<{ x: number; y: number }> {
-  const tab = await getActiveTab();
-  return await send(tab.id!, { type: "page/scrollTo", elementId });
+  return await send(await resolveTabId(tabId), { type: "page/scrollTo", elementId });
 }
 
 export async function formInputInActivePage(
   elementId: string,
   value: string,
+  tabId?: number,
 ): Promise<{ id: string; tag: string; state: string }> {
-  const tab = await getActiveTab();
-  return await send(tab.id!, { type: "page/formInput", elementId, value });
+  return await send(await resolveTabId(tabId), { type: "page/formInput", elementId, value });
 }
 
 /** Fresh element geometry (scrolled into view) for trusted-click aiming. */
-export async function rectInActivePage(elementId: string): Promise<ElementRect> {
-  const tab = await getActiveTab();
-  return await send<ElementRect>(tab.id!, { type: "page/rect", elementId });
+export async function rectInActivePage(elementId: string, tabId?: number): Promise<ElementRect> {
+  return await send<ElementRect>(await resolveTabId(tabId), { type: "page/rect", elementId });
 }
 
 /** Semantic element search — ranked matches with ids + measured centers. */
-export async function findInActivePage(query: string): Promise<unknown> {
-  const tab = await getActiveTab();
-  return await send(tab.id!, { type: "page/find", query });
+export async function findInActivePage(query: string, tabId?: number): Promise<unknown> {
+  return await send(await resolveTabId(tabId), { type: "page/find", query });
 }
 
 /** Full readable page text (innerText), clipped at 60K chars. */
-export async function textOfActivePage(): Promise<unknown> {
-  const tab = await getActiveTab();
-  return await send(tab.id!, { type: "page/text" });
+export async function textOfActivePage(tabId?: number): Promise<unknown> {
+  return await send(await resolveTabId(tabId), { type: "page/text" });
 }
 
 /** Deliver a fetched file into a file input on the page. */
@@ -190,19 +237,17 @@ export async function setFileInActivePage(
   name: string,
   mime: string,
   base64: string,
+  tabId?: number,
 ): Promise<unknown> {
-  const tab = await getActiveTab();
-  return await send(tab.id!, { type: "page/setFile", elementId, name, mime, base64 });
+  return await send(await resolveTabId(tabId), { type: "page/setFile", elementId, name, mime, base64 });
 }
 
 /** Locate a file input on the page (usually hidden) for uploads. */
-export async function findFileInputInActivePage(): Promise<unknown> {
-  const tab = await getActiveTab();
-  return await send(tab.id!, { type: "page/fileInput" });
+export async function findFileInputInActivePage(tabId?: number): Promise<unknown> {
+  return await send(await resolveTabId(tabId), { type: "page/fileInput" });
 }
 
 /** Wait until the DOM stops mutating (or timeout) — post-action settle. */
-export async function waitForSettleInActivePage(timeoutMs?: number): Promise<unknown> {
-  const tab = await getActiveTab();
-  return await send(tab.id!, { type: "page/waitFor", timeoutMs });
+export async function waitForSettleInActivePage(timeoutMs?: number, tabId?: number): Promise<unknown> {
+  return await send(await resolveTabId(tabId), { type: "page/waitFor", timeoutMs });
 }

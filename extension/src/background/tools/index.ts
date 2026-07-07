@@ -15,10 +15,11 @@
  */
 
 import {
+  bindTaskTab,
   clickInActivePage,
   findInActivePage,
   formInputInActivePage,
-  getActiveTab,
+  getTaskTab,
   readActivePage,
   rectInActivePage,
   scrollActivePageTo,
@@ -293,7 +294,7 @@ const MAX_SHOT_AREA = 1_100_000;
  */
 export async function probeDisplayDims(): Promise<{ width: number; height: number }> {
   try {
-    const tab = await getActiveTab();
+    const tab = await getTaskTab();
     if (tab.id !== undefined) {
       const [res] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
@@ -598,13 +599,8 @@ async function mouseDrag(
 // ── Screenshot / zoom ─────────────────────────────────────────────────────────
 
 async function captureRaw(): Promise<{ dataUrl: string; dpr: number; tab: chrome.tabs.Tab }> {
-  const tab = await getActiveTab();
-  if (tab.windowId === undefined) throw new Error("no active window");
-  if (tab.id === undefined) throw new Error("no active tab");
-  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-    format: "jpeg",
-    quality: 70,
-  });
+  const tab = await getTaskTab();
+  if (tab.id === undefined) throw new Error("no task tab");
   let dpr = 1;
   try {
     const [res] = await chrome.scripting.executeScript({
@@ -615,7 +611,30 @@ async function captureRaw(): Promise<{ dataUrl: string; dpr: number; tab: chrome
   } catch {
     // restricted page — assume 1x
   }
-  return { dataUrl, dpr, tab };
+  // Visible path: classic capture, no debugger banner needed.
+  if (tab.active && tab.windowId !== undefined) {
+    try {
+      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+        format: "jpeg",
+        quality: 70,
+      });
+      return { dataUrl, dpr, tab };
+    } catch {
+      // Minimized window / capture blocked — fall through to CDP below.
+    }
+  }
+  // Background path: the user is on another tab or window. CDP renders OUR
+  // tab regardless of focus, so the task keeps running while they browse.
+  const res = (await cdp(tab.id, "Page.captureScreenshot", {
+    format: "jpeg",
+    quality: 70,
+  })) as { data?: string } | undefined;
+  if (!res?.data) {
+    throw new Error(
+      "screenshot failed — the task tab may be unloaded; use tabs_switch to bring it forward once",
+    );
+  }
+  return { dataUrl: `data:image/jpeg;base64,${res.data}`, dpr, tab };
 }
 
 async function takeScreenshot(): Promise<Record<string, unknown>> {
@@ -684,6 +703,31 @@ interface ComputerInput {
   region?: [number, number, number, number];
 }
 
+/** A batch step: a computer action, or a whitelisted DOM tool invocation. */
+interface BatchStep extends ComputerInput {
+  tool?: string;
+  input?: Record<string, unknown>;
+}
+
+/**
+ * Tools allowed inside batch_actions. Excluded on purpose: navigate/tabs_*
+ * (need the agent loop's confirmation policy), javascript_eval (always
+ * user-confirmed), batch_actions (recursion).
+ */
+const BATCHABLE_TOOLS = new Set([
+  "find",
+  "read_page",
+  "get_page_text",
+  "click",
+  "type",
+  "form_input",
+  "hover",
+  "scroll_to",
+  "get_active_tab",
+  "read_console",
+  "read_network",
+]);
+
 function requireCoord(input: ComputerInput): [number, number] {
   const c = input.coordinate;
   if (!Array.isArray(c) || c.length !== 2 || typeof c[0] !== "number" || typeof c[1] !== "number") {
@@ -693,9 +737,29 @@ function requireCoord(input: ComputerInput): [number, number] {
 }
 
 async function activeTabId(): Promise<number> {
-  const tab = await getActiveTab();
-  if (tab.id === undefined) throw new Error("no active tab");
+  const tab = await getTaskTab();
+  if (tab.id === undefined) throw new Error("no task tab");
   return tab.id;
+}
+
+/**
+ * If the last action started a page load (link click, form submit), wait for
+ * it to finish before the result screenshot — otherwise the model sees a
+ * half-loaded page and acts on it. No-op (one tabs.get) when already loaded.
+ */
+async function waitForTabLoad(timeoutMs = 8000): Promise<void> {
+  const start = Date.now();
+  for (;;) {
+    let status: string | undefined;
+    try {
+      status = (await getTaskTab()).status;
+    } catch {
+      return;
+    }
+    if (status !== "loading") return;
+    if (Date.now() - start >= timeoutMs) return;
+    await new Promise((r) => setTimeout(r, 200));
+  }
 }
 
 async function executeComputerAction(input: ComputerInput): Promise<unknown> {
@@ -889,6 +953,7 @@ const HANDLERS: Record<string, ToolHandler> = {
     const a = input?.action ?? "";
     const NO_SHOT = new Set(["screenshot", "zoom", "wait", "cursor_position"]);
     if (a && !NO_SHOT.has(a)) {
+      await waitForTabLoad().catch(() => {});
       await waitForSettleInActivePage(800).catch(
         () => new Promise((r) => setTimeout(r, 250)),
       );
@@ -901,38 +966,68 @@ const HANDLERS: Record<string, ToolHandler> = {
   },
 
   /**
-   * Run several computer actions in one round trip. Stops on the first error;
-   * always finishes with a fresh screenshot so the model sees the result.
+   * Run several steps in one round trip. A step is either a computer action
+   * ({action: "left_click", ...}) or a whitelisted DOM tool
+   * ({tool: "find", input: {query: "..."}}) — so look→act sequences like
+   * hover → read_page → click land in ONE round instead of three. Stops on
+   * the first error; always finishes with a fresh screenshot. Tool steps'
+   * results come back in step_results (clipped) so the model can use what
+   * a read/find step saw.
    */
-  async batch_actions({ actions }: { actions?: ComputerInput[] }) {
+  async batch_actions({ actions }: { actions?: BatchStep[] }) {
     if (!Array.isArray(actions) || actions.length === 0) {
-      throw new Error("batch_actions requires actions: [{action: ...}, ...]");
+      throw new Error("batch_actions requires actions: [{action: ...} | {tool: ..., input: {...}}, ...]");
     }
     if (actions.length > 20) throw new Error("batch_actions is limited to 20 steps");
 
     let completed = 0;
     let errorMsg: string | null = null;
+    const stepResults: { step: number; ran: string; result?: string }[] = [];
+    let resultBudget = 12_000; // total chars of tool-step output we pass back
+
     for (const step of actions) {
+      const idx = completed + 1;
       // Screenshots mid-batch are pointless (the model can't see them until
       // the batch returns) — skip them; one is appended at the end anyway.
       if (step?.action === "screenshot") { completed++; continue; }
       try {
-        await executeComputerAction(step ?? {});
+        if (step?.tool) {
+          const name = String(step.tool);
+          if (!BATCHABLE_TOOLS.has(name)) {
+            throw new Error(
+              `tool "${name}" cannot run inside a batch (allowed: ${[...BATCHABLE_TOOLS].join(", ")}) — call it on its own`,
+            );
+          }
+          const handler = HANDLERS[name];
+          const value = await handler(step.input ?? {});
+          const clip = Math.min(3_000, Math.max(0, resultBudget));
+          const text = JSON.stringify(value ?? null).slice(0, clip);
+          resultBudget -= text.length;
+          stepResults.push({ step: idx, ran: name, result: text });
+        } else {
+          await executeComputerAction(step ?? {});
+          stepResults.push({ step: idx, ran: step?.action ?? "?" });
+        }
         completed++;
+        // If the step kicked off a navigation, let it finish before the next
+        // step fires into a half-loaded page.
+        await waitForTabLoad(6000).catch(() => {});
         // Anthropic best practice: give UIs ~300ms to react between steps.
         await new Promise((r) => setTimeout(r, 300));
       } catch (err) {
-        errorMsg = `step ${completed + 1} (${step?.action}) failed: ${err instanceof Error ? err.message : String(err)}`;
+        errorMsg = `step ${idx} (${step?.tool ?? step?.action}) failed: ${err instanceof Error ? err.message : String(err)}`;
         break;
       }
     }
     // Let the page settle (DOM quiet or 1.2s cap) before the result shot.
+    await waitForTabLoad().catch(() => {});
     await waitForSettleInActivePage(1200).catch(
       () => new Promise((r) => setTimeout(r, 350)),
     );
     const shot = await takeScreenshot().catch(() => null);
     return {
       ...(shot ?? {}),
+      step_results: stepResults,
       note: errorMsg
         ? `completed ${completed}/${actions.length} steps, then: ${errorMsg}. Screenshot shows the state after the last successful step.`
         : `completed ${completed}/${actions.length} steps. Screenshot shows the result.`,
@@ -946,8 +1041,8 @@ const HANDLERS: Record<string, ToolHandler> = {
    */
   async javascript_eval({ script }: { script: string }) {
     requireString(script, "script");
-    const tab = await getActiveTab();
-    if (tab.id === undefined) throw new Error("no active tab");
+    const tab = await getTaskTab();
+    if (tab.id === undefined) throw new Error("no task tab");
     const [res] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       world: "MAIN",
@@ -1041,7 +1136,7 @@ const HANDLERS: Record<string, ToolHandler> = {
     // coordinates for the computer tool / batch_actions instead.
     let frameMatches: unknown[] = [];
     try {
-      const tab = await getActiveTab();
+      const tab = await getTaskTab();
       if (tab.id !== undefined) {
         const hits = await crossFrameFind(tab.id, query);
         frameMatches = hits.slice(0, 6).map((h) => ({
@@ -1128,8 +1223,8 @@ const HANDLERS: Record<string, ToolHandler> = {
 
   /** Recent console output (log/warn/error) captured while Eva works. */
   async read_console({ limit }: { limit?: number }) {
-    const tab = await getActiveTab();
-    if (tab.id === undefined) throw new Error("no active tab");
+    const tab = await getTaskTab();
+    if (tab.id === undefined) throw new Error("no task tab");
     const entries = (consoleBuf.get(tab.id) ?? []).slice(-(limit ?? 40));
     return entries.length
       ? { entries }
@@ -1138,8 +1233,8 @@ const HANDLERS: Record<string, ToolHandler> = {
 
   /** Recent network requests captured while Eva works. */
   async read_network({ filter, limit }: { filter?: string; limit?: number }) {
-    const tab = await getActiveTab();
-    if (tab.id === undefined) throw new Error("no active tab");
+    const tab = await getTaskTab();
+    if (tab.id === undefined) throw new Error("no task tab");
     let entries = networkBuf.get(tab.id) ?? [];
     if (filter) {
       const f = filter.toLowerCase();
@@ -1154,11 +1249,14 @@ const HANDLERS: Record<string, ToolHandler> = {
   },
 
   async get_active_tab() {
-    const tab = await getActiveTab();
+    const tab = await getTaskTab();
     return {
       url: tab.url ?? "(unknown)",
       title: tab.title ?? "(no title)",
       tabId: tab.id,
+      ...(tab.active
+        ? {}
+        : { note: "your task tab (running in the background — the user is viewing another tab; keep working here)" }),
     };
   },
 
@@ -1169,8 +1267,8 @@ const HANDLERS: Record<string, ToolHandler> = {
     // mousedown-driven widgets (Google Docs toolbar, custom menus) ignore.
     try {
       const rect = await rectInActivePage(element_id);
-      const tab = await getActiveTab();
-      if (tab.id === undefined) throw new Error("no active tab");
+      const tab = await getTaskTab();
+      if (tab.id === undefined) throw new Error("no task tab");
       await mouseClick(tab.id, rect.cx, rect.cy, "left", 1, 0);
       return { clicked: element_id, at: [rect.cx, rect.cy], method: "mouse" };
     } catch (err) {
@@ -1204,8 +1302,8 @@ const HANDLERS: Record<string, ToolHandler> = {
   async hover({ element_id }: { element_id: string }) {
     requireString(element_id, "element_id");
     const rect = await rectInActivePage(element_id);
-    const tab = await getActiveTab();
-    if (tab.id === undefined) throw new Error("no active tab");
+    const tab = await getTaskTab();
+    if (tab.id === undefined) throw new Error("no task tab");
     await mouseMove(tab.id, rect.cx, rect.cy, 0);
     await new Promise((r) => setTimeout(r, 600));
     return { hovering: element_id, at: [rect.cx, rect.cy] };
@@ -1218,8 +1316,8 @@ const HANDLERS: Record<string, ToolHandler> = {
 
   async navigate({ url }: { url: string }) {
     requireString(url, "url");
-    const tab = await getActiveTab();
-    if (tab.id === undefined) throw new Error("active tab has no id");
+    const tab = await getTaskTab();
+    if (tab.id === undefined) throw new Error("task tab has no id");
     const tabId = tab.id;
     if (url === "back" || url === "forward") {
       if (url === "back") await chrome.tabs.goBack(tabId);
@@ -1263,6 +1361,7 @@ const HANDLERS: Record<string, ToolHandler> = {
       throw new Error("url must start with http:// or https://");
     }
     const tab = await chrome.tabs.create({ url, active: true });
+    if (tab.id !== undefined) bindTaskTab(tab.id);
     return { id: tab.id, url: tab.url ?? url };
   },
 
@@ -1272,12 +1371,14 @@ const HANDLERS: Record<string, ToolHandler> = {
     if (tab.windowId !== undefined) {
       await chrome.windows.update(tab.windowId, { focused: true });
     }
+    bindTaskTab(tab_id);
     return { id: tab.id, url: tab.url };
   },
 
   async tabs_close({ tab_id }: { tab_id: number }) {
     if (typeof tab_id !== "number") throw new Error("tab_id must be a number");
     await chrome.tabs.remove(tab_id);
+    // Closing the bound tab: next tool call rebinds to the active tab.
     return { closed: tab_id };
   },
 };
