@@ -19,7 +19,9 @@ import {
   adjustCap,
   createUser,
   setUserPlan,
+  getUserActivity,
   type User,
+  type UserActivity,
 } from "../db.js";
 import { PLANS, type PlanId } from "../plans.js";
 import { loadEnv } from "../env.js";
@@ -133,6 +135,37 @@ function planButtons(u: User): string {
     .join(" ");
 }
 
+/** "today 14:32" / "yesterday" / "5d ago" / "12 Jun" — compact and scannable. */
+function fmtLastActive(iso: string | null): string {
+  if (!iso) return `<span style="color:#bbb">never</span>`;
+  const d = new Date(iso);
+  const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  if (days === 0) return `<strong style="color:#1a7a4a">today ${hm}</strong>`;
+  if (days === 1) return `yesterday ${hm}`;
+  if (days < 7) return `${days}d ago`;
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
+function activityCell(a: UserActivity): string {
+  const avg =
+    a.avgSessionMin == null
+      ? "—"
+      : a.avgSessionMin < 1
+        ? "<1 min"
+        : `${Math.round(a.avgSessionMin)} min`;
+  const platform =
+    a.requests30d > 0 && a.platformShare > 0
+      ? `<div style="color:#7b3fc4">${Math.round(a.platformShare * 100)}% via platform</div>`
+      : "";
+  return `<div style="font-size:12px;line-height:1.7;color:#555">
+    <div>Last: ${fmtLastActive(a.lastActive)}</div>
+    <div>${a.sessions7d} sessions / 7d · ${a.sessions30d} / 30d</div>
+    <div>Avg session: ${avg} · ${a.requests30d} req/30d</div>
+    ${platform}
+  </div>`;
+}
+
 function rows(users: User[]): string {
   if (users.length === 0) {
     return `<tr><td colspan="8" style="padding:32px;text-align:center;color:#aaa;font-size:13px">No users yet — add one above.</td></tr>`;
@@ -140,6 +173,7 @@ function rows(users: User[]): string {
   return users
     .map((u) => {
       const revoked = !!u.revoked_at;
+      const activity = getUserActivity(u.id);
       const badge = revoked
         ? `<span style="display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;background:#fde8e8;color:#c0392b">Revoked</span>`
         : `<span style="display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;background:#d4f5e9;color:#1a7a4a">Active</span>`;
@@ -147,10 +181,10 @@ function rows(users: User[]): string {
       <td style="padding:14px 16px;font-weight:500">${esc(u.name)}</td>
       <td style="padding:14px 16px">${badge}</td>
       <td style="padding:14px 16px">${planBadge(u.plan)}<div style="margin-top:6px">${planButtons(u)}</div></td>
+      <td style="padding:14px 16px">${activityCell(activity)}</td>
       <td style="padding:14px 16px">${bar(u.period_input_tokens, u.monthly_cap_input_tokens, "#6b1a2e")}</td>
       <td style="padding:14px 16px">${bar(u.period_output_tokens, u.monthly_cap_output_tokens, "#7b3fc4")}</td>
       <td style="padding:14px 16px;font-size:12px;color:#555">$${estUsd(u.period_input_tokens, u.period_output_tokens).toFixed(2)}</td>
-      <td style="padding:14px 16px;font-family:monospace;font-size:11px;color:#aaa">${esc(u.token.slice(0, 12))}…</td>
       <td style="padding:14px 16px">
         ${
           !revoked
@@ -264,8 +298,8 @@ tr:not(:last-child) td { border-bottom:1px solid #faf0f5; }
   <div class="card">
     <table>
       <thead><tr>
-        <th>Name</th><th>Status</th><th>Plan</th>
-        <th>Input tokens</th><th>Output tokens</th><th>Est. cost</th><th>Token</th><th>Actions</th>
+        <th>Name</th><th>Status</th><th>Plan</th><th>Activity</th>
+        <th>Input tokens</th><th>Output tokens</th><th>Est. cost</th><th>Actions</th>
       </tr></thead>
       <tbody>${rows(users)}</tbody>
     </table>

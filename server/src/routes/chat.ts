@@ -85,6 +85,14 @@ chatRoute.post("/", async (c) => {
   );
   const tools = withToolsCache(req.tools as Anthropic.ToolUnion[] | undefined);
 
+  // Platform chat sends a browser Origin (app.evai.is); the extension's
+  // background worker sends a chrome-extension origin or none.
+  const origin = c.req.header("origin") ?? "";
+  const usageSource: "extension" | "platform" =
+    origin.includes("evai.is") || origin.includes("eva-innsyn.vercel.app")
+      ? "platform"
+      : "extension";
+
   // --- SSE passthrough -------------------------------------------------
   return streamSSE(c, async (sse) => {
     const abort = new AbortController();
@@ -134,7 +142,7 @@ chatRoute.post("/", async (c) => {
       } finally {
         if (user && (inputTokens > 0 || outputTokens > 0)) {
           try {
-            recordUsage(user.id, inputTokens, outputTokens);
+            recordUsage(user.id, inputTokens, outputTokens, usageSource);
           } catch (e) {
             console.error("[eva-insight] failed to record usage", e);
           }

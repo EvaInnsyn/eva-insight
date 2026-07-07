@@ -65,6 +65,23 @@ export function initDb(filepath = "data/eva.db"): Database.Database {
     db.exec(`ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'innsyn';`);
   }
 
+  // Per-request activity log (timestamps + token counts only — no content).
+  // Powers the admin activity stats: last active, sessions/week, avg length.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS usage_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      ts TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'extension',
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS usage_events_user_ts ON usage_events(user_id, ts);
+    CREATE INDEX IF NOT EXISTS usage_events_ts ON usage_events(ts);
+  `);
+  // Keep 90 days — plenty for weekly/monthly stats, keeps the file small.
+  db.prepare("DELETE FROM usage_events WHERE ts < datetime('now', '-90 days')").run();
+
   return db;
 }
 
@@ -230,11 +247,12 @@ export function rolloverIfNeeded(user: User): User {
   return findUserById(user.id)!;
 }
 
-/** Add usage to the user's running counters. */
+/** Add usage to the user's running counters + append to the activity log. */
 export function recordUsage(
   userId: string,
   inputTokens: number,
   outputTokens: number,
+  source: "extension" | "platform" = "extension",
 ): void {
   getDb()
     .prepare(
@@ -244,6 +262,80 @@ export function recordUsage(
         WHERE id = ?`,
     )
     .run(inputTokens, outputTokens, userId);
+  getDb()
+    .prepare(
+      `INSERT INTO usage_events (user_id, ts, source, input_tokens, output_tokens)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(userId, new Date().toISOString(), source, inputTokens, outputTokens);
+}
+
+// --- Activity stats (admin dashboard) ---------------------------------
+
+export interface UserActivity {
+  /** ISO timestamp of the newest request, or null if never active. */
+  lastActive: string | null;
+  /** Distinct usage sessions in the last 7 / 30 days (30-min idle gap). */
+  sessions7d: number;
+  sessions30d: number;
+  /** Requests in the last 7 / 30 days. */
+  requests7d: number;
+  requests30d: number;
+  /** Mean session length in minutes over the last 30 days (null if no data). */
+  avgSessionMin: number | null;
+  /** Share of last-30d requests that came from the platform chat (0–1). */
+  platformShare: number;
+}
+
+const SESSION_GAP_MS = 30 * 60 * 1000;
+
+/** Compute activity stats from the last 30 days of usage events. */
+export function getUserActivity(userId: string): UserActivity {
+  const rows = getDb()
+    .prepare<[string], { ts: string; source: string }>(
+      `SELECT ts, source FROM usage_events
+       WHERE user_id = ? AND ts >= datetime('now', '-30 days')
+       ORDER BY ts ASC`,
+    )
+    .all(userId);
+
+  const last = getDb()
+    .prepare<[string], { ts: string }>(
+      "SELECT ts FROM usage_events WHERE user_id = ? ORDER BY ts DESC LIMIT 1",
+    )
+    .get(userId);
+
+  const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
+  let requests7d = 0;
+  let platformCount = 0;
+
+  // Sessionize: a new session starts after a 30-minute quiet gap.
+  const sessions: { start: number; end: number }[] = [];
+  for (const r of rows) {
+    const t = Date.parse(r.ts);
+    if (r.source === "platform") platformCount++;
+    if (t >= weekAgo) requests7d++;
+    const cur = sessions[sessions.length - 1];
+    if (cur && t - cur.end <= SESSION_GAP_MS) cur.end = t;
+    else sessions.push({ start: t, end: t });
+  }
+
+  const sessions7d = sessions.filter((s) => s.end >= weekAgo).length;
+  const durations = sessions.map((s) => (s.end - s.start) / 60_000);
+  const avg =
+    durations.length > 0
+      ? durations.reduce((a, b) => a + b, 0) / durations.length
+      : null;
+
+  return {
+    lastActive: last?.ts ?? null,
+    sessions7d,
+    sessions30d: sessions.length,
+    requests7d,
+    requests30d: rows.length,
+    avgSessionMin: avg,
+    platformShare: rows.length > 0 ? platformCount / rows.length : 0,
+  };
 }
 
 /** Returns true when the user has hit either cap. */
