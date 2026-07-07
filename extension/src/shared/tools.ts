@@ -156,6 +156,18 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
     },
   },
   {
+    name: "javascript_eval",
+    description:
+      "LAST RESORT: run JavaScript in the page and get the last expression's value back. Use only when find/click/computer genuinely cannot do the job (reading hidden state, triggering an app's own API). The user must approve every run. Some sites block script injection.",
+    input_schema: {
+      type: "object",
+      properties: {
+        script: { type: "string", description: "JavaScript to evaluate in the page." },
+      },
+      required: ["script"],
+    },
+  },
+  {
     name: "tabs_list",
     description: "List open tabs in the current window (id, url, title, active).",
     input_schema: { type: "object", properties: {}, required: [] },
@@ -211,7 +223,7 @@ export function buildEvaTools(display: { width: number; height: number }): ToolS
 // ---------------------------------------------------------------------
 
 /** Tool calls that always require a user confirmation, no exceptions. */
-const ALWAYS_CONFIRM = new Set(["tabs_close"]);
+const ALWAYS_CONFIRM = new Set(["tabs_close", "javascript_eval"]);
 
 /**
  * Decide whether a tool call needs a user confirmation. Returns the
@@ -225,6 +237,9 @@ export function needsConfirmation(
   if (ALWAYS_CONFIRM.has(toolName)) {
     if (toolName === "tabs_close") {
       return { prompt: "Close this browser tab?" };
+    }
+    if (toolName === "javascript_eval") {
+      return { prompt: "Run a script on this page? (Eva wants to use JavaScript for a step her normal tools can't reach.)" };
     }
   }
   if (toolName === "navigate" || toolName === "tabs_create") {
@@ -268,6 +283,9 @@ You control ONE browser tab — the user's active tab. The computer tool sees an
 - **Canvas editors (Word Online, Google Docs, design tools): prefer the keyboard.** Click once into the document, then use shortcuts — ctrl+a to select all, ctrl+b bold, arrow keys, Home/End. Shortcuts beat pixel-hunting toolbars. If a shortcut does nothing, the user may be on Mac — try cmd instead of ctrl once, then stick with what worked.
 - **Small text you can't read: zoom.** The zoom action shows a region at full resolution. Never take coordinates from a zoomed image — screenshot again for coordinates.
 - Text selection on a canvas: left_click_drag from start to end of the text, or click then shift+arrow/shift+End via key.
+
+## When something doesn't work — switch strategy, never repeat
+Never try the same approach more than twice. The ladder: (1) keyboard shortcut, (2) find + click/hover by id, (3) computer-tool coordinates from a FRESH screenshot, (4) zoom to inspect then retry once, (5) javascript_eval (user approves). If a click changed nothing twice, the element probably isn't the right target — find again with different words. After two full strategy switches without progress, stop and tell the user precisely what you tried and where it sticks.
 
 ## Rules
 - The user already told you what to do. Start doing it. Never respond with "What do you need help with?" or any variation.

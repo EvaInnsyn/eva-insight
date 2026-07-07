@@ -141,7 +141,8 @@ function toolResultContent(output: string | undefined, isError: boolean): unknow
     if (
       typeof parsed.mime_type === "string" &&
       parsed.mime_type.startsWith("image/") &&
-      typeof parsed.base64 === "string"
+      typeof parsed.base64 === "string" &&
+      parsed.base64.length > 0
     ) {
       const blocks: unknown[] = [
         {

@@ -86,6 +86,7 @@ function labelFor(name: string, input?: unknown): string {
   }
   switch (name) {
     case "find": return "Finding";
+    case "javascript_eval": return "Running script";
     case "hover": return "Hovering";
     case "read_page": return "Reading page";
     case "get_active_tab": return "Checking tab";
@@ -114,6 +115,7 @@ function iconFor(name: string): string {
     case "computer": return "🖱";
     case "batch_actions": return "⚡";
     case "find": return "🔎";
+    case "javascript_eval": return "🧪";
     case "hover": return "👇";
     case "read_page": return "📄";
     case "get_active_tab":

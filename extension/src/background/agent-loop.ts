@@ -51,7 +51,8 @@ function buildToolResultContent(output: string, isError: boolean): unknown {
     if (
       typeof parsed.mime_type === "string" &&
       parsed.mime_type.startsWith("image/") &&
-      typeof parsed.base64 === "string"
+      typeof parsed.base64 === "string" &&
+      parsed.base64.length > 0
     ) {
       const blocks: unknown[] = [];
       // Batch results carry a note ("completed 5/5 steps…") — text first so
@@ -239,6 +240,11 @@ export async function runAgentLoop(
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (signal.aborted) break;
 
+    // Enforced silence while working: text produced in a round that goes on
+    // to call tools is play-by-play — keep it in the API history (coherence)
+    // but never show it. Only a round that ENDS the turn flushes its text to
+    // the panel, so the user sees action cards while Eva works and exactly
+    // one message when she's done.
     const result = await runChat({
       settings,
       accessToken,
@@ -246,7 +252,7 @@ export async function runAgentLoop(
       messages: pruneMessages(messages),
       tools,
       signal,
-      onTextDelta: callbacks.onTextDelta,
+      onTextDelta: () => {},
       onToolUseStart: (tu) => {
         callbacks.onToolStart(tu, new Date().toISOString());
       },
@@ -255,6 +261,7 @@ export async function runAgentLoop(
 
     if (result.toolUses.length === 0) {
       if (result.text.length > 0) {
+        callbacks.onTextDelta(result.text);
         messages.push({ role: "assistant", content: result.text });
       }
       endedTurn = true;

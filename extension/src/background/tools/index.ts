@@ -575,6 +575,39 @@ const HANDLERS: Record<string, ToolHandler> = {
     };
   },
 
+  /**
+   * Run JavaScript in the page's MAIN world — the escape hatch when normal
+   * tools can't reach something. Always user-confirmed. Result is the last
+   * expression's value, stringified and clipped.
+   */
+  async javascript_eval({ script }: { script: string }) {
+    requireString(script, "script");
+    const tab = await getActiveTab();
+    if (tab.id === undefined) throw new Error("no active tab");
+    const [res] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: "MAIN",
+      func: (src: string) => {
+        try {
+          // eslint-disable-next-line no-eval
+          const value = (0, eval)(src);
+          const out =
+            typeof value === "object" && value !== null
+              ? JSON.stringify(value)
+              : String(value);
+          return { ok: true, value: String(out ?? "").slice(0, 4000) };
+        } catch (e) {
+          return { ok: false, error: String(e) };
+        }
+      },
+      args: [script],
+    });
+    const r = res?.result as { ok?: boolean; value?: string; error?: string } | undefined;
+    if (!r) throw new Error("script produced no result (page may block injection)");
+    if (!r.ok) throw new Error(r.error ?? "script failed");
+    return { result: r.value };
+  },
+
   async read_page() {
     const snapshot = await readActivePage();
     const json = JSON.stringify(snapshot);
