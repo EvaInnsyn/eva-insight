@@ -195,6 +195,12 @@ export async function setFileInActivePage(
   return await send(tab.id!, { type: "page/setFile", elementId, name, mime, base64 });
 }
 
+/** Locate a file input on the page (usually hidden) for uploads. */
+export async function findFileInputInActivePage(): Promise<unknown> {
+  const tab = await getActiveTab();
+  return await send(tab.id!, { type: "page/fileInput" });
+}
+
 /** Wait until the DOM stops mutating (or timeout) — post-action settle. */
 export async function waitForSettleInActivePage(timeoutMs?: number): Promise<unknown> {
   const tab = await getActiveTab();

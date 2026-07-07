@@ -22,6 +22,7 @@ import {
   readActivePage,
   rectInActivePage,
   scrollActivePageTo,
+  findFileInputInActivePage,
   setFileInActivePage,
   textOfActivePage,
   typeInActivePage,
@@ -128,6 +129,20 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
       method: p?.request?.method ?? "GET",
       url: String(p?.request?.url ?? "").slice(0, 300),
     });
+  } else if (method === "Page.javascriptDialogOpening") {
+    // Native alert/confirm/prompt would freeze the tab forever — accept it,
+    // record what it said so the model knows it happened.
+    pushCapped(consoleBuf, tabId, {
+      level: "dialog",
+      text: `[${p?.type ?? "dialog"} auto-accepted] ${String(p?.message ?? "").slice(0, 300)}`,
+      ts: Date.now(),
+    });
+    void chrome.debugger
+      .sendCommand({ tabId }, "Page.handleJavaScriptDialog", {
+        accept: true,
+        promptText: p?.defaultPrompt ?? "",
+      })
+      .catch(() => {});
   } else if (method === "Network.responseReceived") {
     const req = pendingReqs.get(p?.requestId);
     pendingReqs.delete(p?.requestId);
@@ -176,6 +191,7 @@ async function cdp(tabId: number, method: string, params: object): Promise<unkno
     // read_console / read_network tools with zero extra permissions.
     void chrome.debugger.sendCommand({ tabId }, "Runtime.enable", {}).catch(() => {});
     void chrome.debugger.sendCommand({ tabId }, "Network.enable", {}).catch(() => {});
+    void chrome.debugger.sendCommand({ tabId }, "Page.enable", {}).catch(() => {});
   }
   if (detachTimer) clearTimeout(detachTimer);
   detachTimer = setTimeout(() => void detachDebugger(), 10_000);
@@ -422,6 +438,8 @@ interface ComputerInput {
   action?: string;
   coordinate?: [number, number];
   start_coordinate?: [number, number];
+  /** batch_actions extension: target a measured element instead of pixels. */
+  element_id?: string;
   text?: string;
   scroll_direction?: "up" | "down" | "left" | "right";
   scroll_amount?: number;
@@ -461,6 +479,25 @@ async function executeComputerAction(input: ComputerInput): Promise<unknown> {
     case "middle_click":
     case "double_click":
     case "triple_click": {
+      // Element targeting (batch precision): measure live center, CSS px.
+      if (input.element_id) {
+        const rect = await rectInActivePage(input.element_id);
+        const tabId0 = await activeTabId();
+        const button0: Button =
+          action === "right_click" ? "right" : action === "middle_click" ? "middle" : "left";
+        const clicks0 = action === "double_click" ? 2 : action === "triple_click" ? 3 : 1;
+        if (clicks0 > 1) {
+          await mouseMove(tabId0, rect.cx, rect.cy, modsFromText(input.text));
+          for (let i = 1; i <= clicks0; i++) {
+            const base0 = { x: rect.cx, y: rect.cy, button: button0, clickCount: i, modifiers: modsFromText(input.text) };
+            await cdp(tabId0, "Input.dispatchMouseEvent", { ...base0, type: "mousePressed" });
+            await cdp(tabId0, "Input.dispatchMouseEvent", { ...base0, type: "mouseReleased" });
+          }
+        } else {
+          await mouseClick(tabId0, rect.cx, rect.cy, button0, 1, modsFromText(input.text));
+        }
+        return { ok: true, action, element_id: input.element_id, at_css: [rect.cx, rect.cy] };
+      }
       const c = requireCoord(input);
       const { x, y } = toCss(c);
       lastPos = { x: c[0], y: c[1] };
@@ -483,6 +520,13 @@ async function executeComputerAction(input: ComputerInput): Promise<unknown> {
     }
 
     case "mouse_move": {
+      // With element_id this is a HOVER: rest on the element + settle time.
+      if (input.element_id) {
+        const rect = await rectInActivePage(input.element_id);
+        await mouseMove(await activeTabId(), rect.cx, rect.cy, 0);
+        await new Promise((r) => setTimeout(r, 600));
+        return { ok: true, action: "hover", element_id: input.element_id };
+      }
       const c = requireCoord(input);
       const { x, y } = toCss(c);
       lastPos = { x: c[0], y: c[1] };
@@ -532,7 +576,14 @@ async function executeComputerAction(input: ComputerInput): Promise<unknown> {
       if (typeof input.text !== "string" || input.text.length === 0) {
         throw new Error("type requires text");
       }
-      await cdp(await activeTabId(), "Input.insertText", { text: input.text });
+      const tabId = await activeTabId();
+      // With element_id: click the field first (focus), then insert.
+      if (input.element_id) {
+        const rect = await rectInActivePage(input.element_id);
+        await mouseClick(tabId, rect.cx, rect.cy, "left", 1, 0);
+        await new Promise((r) => setTimeout(r, 120));
+      }
+      await cdp(tabId, "Input.insertText", { text: input.text });
       return { ok: true, action, length: input.text.length };
     }
 
@@ -668,9 +719,25 @@ const HANDLERS: Record<string, ToolHandler> = {
     return { result: r.value };
   },
 
-  async read_page({ filter, max_chars }: { filter?: string; max_chars?: number } = {}) {
+  async read_page({ filter, max_chars, ref_id }: { filter?: string; max_chars?: number; ref_id?: string } = {}) {
     const snapshot = await readActivePage();
     const cap = Math.min(Math.max(max_chars ?? 40_000, 4_000), 100_000);
+
+    // Focus on one subtree (e.g. just the menu that opened).
+    if (ref_id) {
+      let found: any = null;
+      const locate = (n: any) => {
+        if (!n || found) return;
+        if (n.id === ref_id) { found = n; return; }
+        (n.children ?? []).forEach(locate);
+      };
+      locate(snapshot.root);
+      if (!found) throw new Error(`element ${ref_id} not found in the current page tree`);
+      const json = JSON.stringify(found);
+      return json.length <= cap
+        ? { url: snapshot.url, subtree: found }
+        : { url: snapshot.url, _truncated: true, data: json.slice(0, cap) };
+    }
 
     if (filter === "interactive") {
       // Flat, token-lean list of things Eva can act on.
@@ -731,8 +798,7 @@ const HANDLERS: Record<string, ToolHandler> = {
    * deliver it into a file input on the page — real uploads without a file
    * picker. 6MB cap.
    */
-  async upload_image({ element_id, url, filename }: { element_id: string; url: string; filename?: string }) {
-    requireString(element_id, "element_id");
+  async upload_image({ element_id, url, filename }: { element_id?: string; url: string; filename?: string }) {
     requireString(url, "url");
     if (!/^https?:\/\//i.test(url)) throw new Error("url must be http(s)");
     const res = await fetch(url);
@@ -748,7 +814,17 @@ const HANDLERS: Record<string, ToolHandler> = {
     for (let i = 0; i < bytes.length; i += 0x8000) {
       binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + 0x8000)));
     }
-    return await setFileInActivePage(element_id, name, mime, btoa(binary));
+    let targetId = element_id;
+    if (!targetId) {
+      const found = (await findFileInputInActivePage()) as { id?: string } | null;
+      if (!found?.id) {
+        throw new Error(
+          "no file-upload field found on the page — click the site's Upload/Add image button first (the input often appears after), then retry",
+        );
+      }
+      targetId = found.id;
+    }
+    return await setFileInActivePage(targetId, name, mime, btoa(binary));
   },
 
   /** Recent console output (log/warn/error) captured while Eva works. */

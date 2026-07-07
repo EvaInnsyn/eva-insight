@@ -7,7 +7,7 @@
  * inputs.
  */
 
-import { resolveId } from "./element-registry";
+import { getId, resolveId } from "./element-registry";
 
 export class StaleElementError extends Error {
   constructor(id: string) {
@@ -251,4 +251,24 @@ export function setFileOnInput(
   el.dispatchEvent(new Event("input", { bubbles: true }));
   el.dispatchEvent(new Event("change", { bubbles: true }));
   return { id, name, size: file.size };
+}
+
+/** Locate a file input anywhere on the page (they're usually hidden). */
+export function findFileInput(): { id: string; visible: boolean } | null {
+  const collect = (doc: Document, out: HTMLInputElement[]) => {
+    out.push(...Array.from(doc.querySelectorAll('input[type="file"]')) as HTMLInputElement[]);
+    for (const f of Array.from(doc.querySelectorAll("iframe"))) {
+      try {
+        const inner = (f as HTMLIFrameElement).contentDocument;
+        if (inner) collect(inner, out);
+      } catch { /* cross-origin */ }
+    }
+  };
+  const inputs: HTMLInputElement[] = [];
+  collect(document, inputs);
+  if (inputs.length === 0) return null;
+  // Prefer the most recently added (sites inject one when Upload is clicked).
+  const el = inputs[inputs.length - 1];
+  const r = el.getBoundingClientRect();
+  return { id: getId(el), visible: r.width > 1 && r.height > 1 };
 }

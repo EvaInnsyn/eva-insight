@@ -54,6 +54,7 @@ export type PageRequest =
   | { type: "page/find"; query: string }
   | { type: "page/text" }
   | { type: "page/setFile"; elementId: string; name: string; mime: string; base64: string }
+  | { type: "page/fileInput" }
   | { type: "page/waitFor"; timeoutMs?: number };
 
 /** Fresh viewport-CSS-px geometry of an element (after scroll-into-view). */

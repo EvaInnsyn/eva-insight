@@ -13,6 +13,7 @@ import { buildSnapshot } from "./a11y-tree";
 import { findElements } from "./find";
 import {
   click,
+  findFileInput,
   formInput,
   getPageText,
   rectOf,
@@ -115,6 +116,8 @@ async function handle(req: PageRequest): Promise<PageResponse> {
         ok: true,
         result: setFileOnInput(req.elementId, req.name, req.mime, req.base64),
       };
+    case "page/fileInput":
+      return { ok: true, result: findFileInput() };
     case "page/waitFor":
       return { ok: true, result: await waitForSettle(req.timeoutMs) };
   }

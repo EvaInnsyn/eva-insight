@@ -39,7 +39,7 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
   {
     name: "batch_actions",
     description:
-      "Execute several computer actions in ONE call — much faster and cheaper than one action per turn. Each item has the same shape as a `computer` tool input (e.g. {action: 'left_click', coordinate: [x,y]}, {action: 'type', text: '...'}, {action: 'key', text: 'Return'}, {action: 'wait', duration: 1}). Use whenever the next several steps are predictable from the current screenshot: click a field → type → press Enter, or a sequence of menu clicks with waits. Runs in order, stops on the first error, and ALWAYS returns a fresh screenshot of the result — do not add a screenshot step yourself. Max 20 steps.",
+      "Execute several actions in ONE call — much faster and cheaper than one action per turn. Items use the computer-tool shape AND can target measured elements by id: {action:'left_click', element_id:'e85'} clicks the element's live center (precise, no pixel guessing); {action:'type', element_id:'e12', text:'...'} focuses the field then types; {action:'mouse_move', element_id:'e7'} hovers it (opens submenus). Coordinate form still works: {action:'left_click', coordinate:[x,y]}; plus {action:'key', text:'Return'} and {action:'wait', duration:1}. THE power move: find once, then batch the whole sequence by element ids. Runs in order, stops on first error, ALWAYS returns a fresh screenshot. Max 20 steps.",
     input_schema: {
       type: "object",
       properties: {
@@ -81,6 +81,7 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
           description: "'interactive' returns only actionable elements as a flat list — cheaper and easier than the full tree.",
         },
         max_chars: { type: "number", description: "Response size cap (4000–100000, default 40000)." },
+        ref_id: { type: "string", description: "Return only this element's subtree — e.g. read just the menu that opened." },
       },
       required: [],
     },
@@ -342,6 +343,8 @@ You control ONE browser tab — the user's active tab. The computer tool sees an
 Never try the same approach more than twice. The ladder: (1) keyboard shortcut, (2) find + click/hover by id, (3) computer-tool coordinates from a FRESH screenshot, (4) zoom to inspect then retry once, (5) javascript_eval (user approves). If a click changed nothing twice, the element probably isn't the right target — find again with different words. After two full strategy switches without progress, stop and tell the user precisely what you tried and where it sticks.
 
 ## More powers
+- Native popups (alert/confirm) are handled automatically — they get accepted and what they said appears in read_console. You never need to worry about them freezing the page.
+- The killer combo: find the elements once → ONE batch_actions with element ids: [{action:'left_click', element_id:'e85'}, {action:'type', element_id:'e85', text:'Lexend'}, {action:'key', text:'Return'}]. Precise AND fast.
 - get_page_text reads a whole article/page as clean text — use it for summarizing or extracting, not read_page.
 - upload_image puts a file (by URL) straight into an upload field — find the input[type=file] id first; look near the Upload button.
 - read_console / read_network reveal what the page did after your actions — check them when something silently fails.

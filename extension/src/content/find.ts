@@ -121,8 +121,18 @@ function collectCandidates(doc: Document, out: Element[]): void {
  * Scoring: phrase > all-tokens > per-token, with a role bonus when the query
  * names a widget kind ("button", "dropdown", "menu item" …).
  */
+/** Accent-insensitive lowercase ("Letur" matches "letur", "é" matches "e"). */
+function norm(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\u00f0/g, "d") // ð
+    .replace(/\u00fe/g, "th"); // þ
+}
+
 export function findElements(query: string): FindMatch[] {
-  const q = query.trim().toLowerCase();
+  const q = norm(query.trim());
   if (!q) throw new Error("find requires a non-empty query");
   const tokens = q.split(/\s+/).filter((t) => t.length > 1);
 
@@ -146,13 +156,17 @@ export function findElements(query: string): FindMatch[] {
     const role = roleOf(el);
     if (!name && !roleBonuses.has(role)) continue;
 
-    const hay = `${name} ${role}`.toLowerCase();
+    const hay = norm(`${name} ${role}`);
+    const hayWords = hay.split(/[^a-z0-9]+/).filter(Boolean);
     let score = 0;
-    if (name.toLowerCase() === q) score += 6;
+    if (norm(name) === q) score += 6;
     else if (hay.includes(q)) score += 4;
-    const present = tokens.filter((t) => hay.includes(t));
-    score += present.length;
-    if (tokens.length > 1 && present.length === tokens.length) score += 2;
+    let present = 0;
+    for (const t of tokens) {
+      if (hay.includes(t)) { score += 1; present++; }
+      else if (hayWords.some((w) => w.startsWith(t) || t.startsWith(w))) { score += 0.5; present++; }
+    }
+    if (tokens.length > 1 && present === tokens.length) score += 2;
     if (roleBonuses.has(role)) score += 2;
     if (score <= 0) continue;
 
