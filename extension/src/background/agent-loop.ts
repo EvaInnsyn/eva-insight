@@ -275,6 +275,9 @@ export async function runAgentLoop(
 
   let lastInfo: ChatStopInfo = { stop_reason: null };
   let endedTurn = false;
+  // Consecutive rounds that only LOOKED (screenshot/find/read) without
+  // changing anything — the over-verification loop signature.
+  let passiveStreak = 0;
 
   // Declare the computer tool's display size from the live viewport so the
   // model's coordinates match the screenshots exactly. Once per run.
@@ -387,6 +390,29 @@ export async function runAgentLoop(
         ...(isError ? { is_error: true } : {}),
       });
     }
+    // Over-verification guard: if Eva only observed this round (no state-
+    // changing action), count it; after two in a row, tell her to wrap up.
+    const PASSIVE_COMPUTER = new Set(["screenshot", "zoom", "wait", "cursor_position", "mouse_move"]);
+    const OBSERVE_TOOLS = new Set([
+      "read_page", "find", "get_active_tab", "get_page_text",
+      "read_console", "read_network", "tabs_list",
+    ]);
+    const changedState = result.toolUses.some((tu) => {
+      if (OBSERVE_TOOLS.has(tu.name)) return false;
+      if (tu.name === "computer") {
+        const act = (tu.input as { action?: string } | null)?.action ?? "";
+        return !PASSIVE_COMPUTER.has(act);
+      }
+      return true; // batch, click, type, navigate, upload, js, tabs_* …
+    });
+    passiveStreak = changedState ? 0 : passiveStreak + 1;
+    if (passiveStreak >= 2) {
+      toolResultBlocks.push({
+        type: "text",
+        text: "[harness] You've now spent multiple rounds only observing without acting. If the task is complete, END YOUR TURN NOW with your one-line result. Only continue if there is a concrete next ACTION to take.",
+      });
+    }
+
     messages.push({ role: "user", content: toolResultBlocks });
   }
 
