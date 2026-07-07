@@ -42,6 +42,158 @@ export function setToolAuthContext(
   authCtx = ctx;
 }
 
+// ── Cross-origin frame search ────────────────────────────────────────────────
+// Wix's canvas and Word Online's editor live in cross-origin iframes that the
+// content script (top frame only) cannot see. We inject a self-contained
+// matcher into every frame via chrome.scripting, then translate local hits
+// into page coordinates by composing iframe offsets up the frame tree.
+
+interface FrameHit {
+  score: number;
+  name: string;
+  role: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Serialized into each frame — no imports, mirrors find.ts scoring (lite). */
+function findInFrameFn(query: string): FrameHit[] {
+  const norm = (s: string) =>
+    s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/\u00f0/g, "d").replace(/\u00fe/g, "th");
+  const q = norm(query);
+  const tokens = q.split(/\s+/).filter((t) => t.length > 1);
+  const sel =
+    "a[href],button,input,select,textarea,summary,[role],[contenteditable],[onclick],[aria-label],[tabindex]";
+  const out: FrameHit[] = [];
+  const els = Array.from(document.querySelectorAll(sel));
+  for (const el of els) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) continue;
+    const st = getComputedStyle(el as HTMLElement);
+    if (st.visibility === "hidden" || st.display === "none" || st.opacity === "0") continue;
+    const name = (
+      el.getAttribute("aria-label") ||
+      el.getAttribute("title") ||
+      (el as HTMLInputElement).placeholder ||
+      (el as HTMLElement).innerText ||
+      el.textContent ||
+      ""
+    ).trim().replace(/\s+/g, " ").slice(0, 80);
+    if (!name) continue;
+    const role = el.getAttribute("role") || el.tagName.toLowerCase();
+    const hay = norm(name + " " + role);
+    let score = 0;
+    if (norm(name) === q) score += 6;
+    else if (hay.includes(q)) score += 4;
+    for (const t of tokens) if (hay.includes(t)) score += 1;
+    if (score <= 0) continue;
+    out.push({
+      score, name, role,
+      x: r.left + r.width / 2, y: r.top + r.height / 2,
+      w: r.width, h: r.height,
+    });
+  }
+  out.sort((a, b) => b.score - a.score);
+  return out.slice(0, 6);
+}
+
+/** Locate a child frame's iframe element in its parent → viewport offset. */
+function frameOffsetFn(childUrl: string): { left: number; top: number } | null {
+  const iframes = Array.from(document.querySelectorAll("iframe"));
+  let best: HTMLIFrameElement | null = null;
+  let bestArea = 0;
+  for (const f of iframes) {
+    const r = f.getBoundingClientRect();
+    const area = r.width * r.height;
+    let matches = false;
+    try {
+      if (f.src) {
+        const su = new URL(f.src, location.href);
+        matches = childUrl.startsWith(su.origin);
+      }
+    } catch { /* ignore */ }
+    // Prefer a URL match; fall back to the largest visible iframe (the canvas).
+    if (matches && area > 0) { best = f as HTMLIFrameElement; break; }
+    if (area > bestArea) { bestArea = area; best = f as HTMLIFrameElement; }
+  }
+  if (!best) return null;
+  const r = best.getBoundingClientRect();
+  return { left: r.left, top: r.top };
+}
+
+/**
+ * Search cross-origin frames and return hits in PAGE viewport CSS px.
+ * Depth-composed via the webNavigation frame tree.
+ */
+async function crossFrameFind(tabId: number, query: string): Promise<
+  { frame: string; role: string; name: string; cssX: number; cssY: number }[]
+> {
+  let frames: chrome.webNavigation.GetAllFrameResultDetails[] = [];
+  try {
+    frames = (await chrome.webNavigation.getAllFrames({ tabId })) ?? [];
+  } catch {
+    return [];
+  }
+  const byId = new Map(frames.map((f) => [f.frameId, f]));
+  const topOrigin = (() => {
+    try { return new URL(byId.get(0)?.url ?? "").origin; } catch { return ""; }
+  })();
+
+  const results: { frame: string; role: string; name: string; cssX: number; cssY: number }[] = [];
+
+  for (const fr of frames) {
+    if (fr.frameId === 0) continue;
+    let frOrigin = "";
+    try { frOrigin = new URL(fr.url).origin; } catch { continue; }
+    // Same-origin frames are already covered by the content script's walk.
+    if (!frOrigin || frOrigin === topOrigin || fr.url === "about:blank") continue;
+
+    let hits: FrameHit[] = [];
+    try {
+      const [res] = await chrome.scripting.executeScript({
+        target: { tabId, frameIds: [fr.frameId] },
+        func: findInFrameFn,
+        args: [query],
+      });
+      hits = (res?.result as FrameHit[]) ?? [];
+    } catch { continue; }
+    if (hits.length === 0) continue;
+
+    // Compose offsets up the parent chain (depth-safe, max 4 hops).
+    let dx = 0, dy = 0, ok = true;
+    let cur = fr;
+    for (let hop = 0; hop < 4 && cur.frameId !== 0; hop++) {
+      const parent = byId.get(cur.parentFrameId);
+      if (!parent) { ok = false; break; }
+      try {
+        const [off] = await chrome.scripting.executeScript({
+          target: { tabId, frameIds: [parent.frameId] },
+          func: frameOffsetFn,
+          args: [cur.url],
+        });
+        const o = off?.result as { left: number; top: number } | null;
+        if (!o) { ok = false; break; }
+        dx += o.left; dy += o.top;
+      } catch { ok = false; break; }
+      cur = parent;
+    }
+    if (!ok || cur.frameId !== 0) continue;
+
+    let host = "";
+    try { host = new URL(fr.url).host; } catch { /* ignore */ }
+    for (const h of hits) {
+      results.push({
+        frame: host, role: h.role, name: h.name,
+        cssX: Math.round(h.x + dx), cssY: Math.round(h.y + dy),
+      });
+    }
+  }
+  return results;
+}
+
 /** Cheap model for micro-decisions (element matching). Exact pinned id. */
 const HELPER_MODEL = "claude-haiku-4-5-20251001";
 
@@ -883,6 +1035,41 @@ const HANDLERS: Record<string, ToolHandler> = {
       return await deepFind(query);
     }
     const matches = await findInActivePage(query);
+
+    // Also search cross-origin frames (Wix canvas, Word Online editor…).
+    // Their hits can't be clicked by id — they come back as screenshot
+    // coordinates for the computer tool / batch_actions instead.
+    let frameMatches: unknown[] = [];
+    try {
+      const tab = await getActiveTab();
+      if (tab.id !== undefined) {
+        const hits = await crossFrameFind(tab.id, query);
+        frameMatches = hits.slice(0, 6).map((h) => ({
+          frame: h.frame,
+          role: h.role,
+          name: h.name,
+          click_coordinate: [
+            Math.round(h.cssX / coordScale),
+            Math.round(h.cssY / coordScale),
+          ],
+        }));
+      }
+    } catch { /* frame search is best-effort */ }
+
+    if (Array.isArray(matches) && matches.length > 0 && frameMatches.length > 0) {
+      return {
+        matches,
+        frame_matches: frameMatches,
+        note: "frame_matches are inside embedded frames — click those with the computer tool at click_coordinate (no element id).",
+      };
+    }
+    if (frameMatches.length > 0 && (!Array.isArray(matches) || matches.length === 0)) {
+      return {
+        matches: [],
+        frame_matches: frameMatches,
+        note: "Found inside an embedded frame — click with the computer tool at click_coordinate (element ids don't work across frames).",
+      };
+    }
     if (Array.isArray(matches) && matches.length === 0) {
       // Word search missed — let the AI matcher try meaning before giving up.
       if (authCtx) {
