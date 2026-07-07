@@ -15,11 +15,13 @@ import type { ChatStopInfo, ProxyMessage } from "../shared/chat";
 import { EVA_TOOL_BETAS, type ToolSchema } from "../shared/tools";
 
 /**
- * Extension tasks run on Opus — Vigdís's call (2026-07-07): quality over
- * margin; prices get revisited. The platform chat panel stays on the
- * server's default (Sonnet) — it doesn't need Opus.
+ * Extension tasks run on Claude Sonnet 5 — the same model Claude-in-Chrome
+ * uses, newest Sonnet generation, listed first for computer use, and at
+ * Sonnet pricing ($3/$15; intro $2/$10 through Aug 2026). Verified against
+ * the live models overview 2026-07-07. Platform chat stays on the server
+ * default.
  */
-export const EXTENSION_MODEL = "claude-opus-4-8";
+export const EXTENSION_MODEL = "claude-sonnet-5";
 import { parseSseStream } from "./sse";
 import type { EvaSettings } from "./settings";
 

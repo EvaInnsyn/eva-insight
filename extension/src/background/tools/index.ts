@@ -730,7 +730,22 @@ async function executeComputerAction(input: ComputerInput): Promise<unknown> {
 
 const HANDLERS: Record<string, ToolHandler> = {
   async computer(input: ComputerInput) {
-    return await executeComputerAction(input ?? {});
+    const result = await executeComputerAction(input ?? {});
+    // Reference-harness behavior the model is trained on: every acting
+    // step returns a fresh screenshot of the result, so act+see is ONE
+    // round instead of two. Pure reads keep their JSON result.
+    const a = input?.action ?? "";
+    const NO_SHOT = new Set(["screenshot", "zoom", "wait", "cursor_position"]);
+    if (a && !NO_SHOT.has(a)) {
+      await waitForSettleInActivePage(800).catch(
+        () => new Promise((r) => setTimeout(r, 250)),
+      );
+      const shot = await takeScreenshot().catch(() => null);
+      if (shot) {
+        return { ...shot, note: `${a} done — screenshot shows the result` };
+      }
+    }
+    return result;
   },
 
   /**

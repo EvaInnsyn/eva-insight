@@ -102,6 +102,7 @@ function bar(used: number, cap: number, color: string): string {
 
 /** $ per 1M tokens [input, output]. Unknown/legacy (null) rows use Sonnet. */
 const MODEL_PRICES: Record<string, [number, number]> = {
+  "claude-sonnet-5": [3, 15],
   "claude-opus-4-8": [5, 25],
   "claude-opus-4-7": [5, 25],
   "claude-opus-4-6": [5, 25],
