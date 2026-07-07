@@ -212,3 +212,43 @@ function scrollIntoViewSafe(el: Element): void {
     // some elements throw on scrollIntoView — ignore
   }
 }
+
+/** Full readable text of the page (innerText), clipped. */
+export function getPageText(): { title: string; url: string; text: string; truncated: boolean } {
+  const raw = document.body?.innerText ?? "";
+  const clean = raw.replace(/\n{3,}/g, "\n\n").trim();
+  const LIMIT = 60_000;
+  return {
+    title: document.title,
+    url: location.href,
+    text: clean.slice(0, LIMIT),
+    truncated: clean.length > LIMIT,
+  };
+}
+
+/**
+ * Put a file into an <input type="file"> via DataTransfer — how the page
+ * receives an "upload" without a real file picker. Fires change/input so
+ * frameworks react.
+ */
+export function setFileOnInput(
+  id: string,
+  name: string,
+  mime: string,
+  base64: string,
+): { id: string; name: string; size: number } {
+  const el = mustResolve(id);
+  if (!(el instanceof HTMLInputElement) || el.type !== "file") {
+    throw new Error(`element ${id} is not a file input`);
+  }
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const file = new File([bytes], name, { type: mime });
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  el.files = dt.files;
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+  return { id, name, size: file.size };
+}

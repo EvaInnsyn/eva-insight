@@ -7,7 +7,7 @@
  * hit MAX_TOOL_ROUNDS.
  */
 
-import { runTool, probeDisplayDims } from "./tools";
+import { runTool, probeDisplayDims, releaseDebugger } from "./tools";
 import {
   ProxyError,
   runChat,
@@ -349,6 +349,10 @@ export async function runAgentLoop(
   // of the user's monthly budget — so it can warn before continuing eats the
   // rest of their usage. Cross-turn memory means "haltu áfram" resumes cleanly.
   const paused = !endedTurn && !signal.aborted;
+
+  // Drop the CDP session promptly so Chrome's debugger bar clears when Eva
+  // finishes instead of lingering for the idle timeout.
+  await releaseDebugger().catch(() => {});
 
   return { info: lastInfo, messages, paused };
 }

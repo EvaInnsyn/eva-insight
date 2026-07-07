@@ -22,6 +22,8 @@ import {
   readActivePage,
   rectInActivePage,
   scrollActivePageTo,
+  setFileInActivePage,
+  textOfActivePage,
   typeInActivePage,
   waitForSettleInActivePage,
 } from "../page-bridge";
@@ -92,9 +94,63 @@ export function computeShotDims(cssW: number, cssH: number): { width: number; he
 let attachedTabId: number | null = null;
 let detachTimer: ReturnType<typeof setTimeout> | null = null;
 
+/** Per-tab console + network buffers, filled while the debugger is attached. */
+interface ConsoleEntry { level: string; text: string; ts: number }
+interface NetworkEntry { method: string; url: string; status?: number; type?: string; ts: number }
+const consoleBuf = new Map<number, ConsoleEntry[]>();
+const networkBuf = new Map<number, NetworkEntry[]>();
+const pendingReqs = new Map<string, { method: string; url: string }>();
+const BUF_CAP = 200;
+
+function pushCapped<T>(map: Map<number, T[]>, tabId: number, entry: T): void {
+  const arr = map.get(tabId) ?? [];
+  arr.push(entry);
+  if (arr.length > BUF_CAP) arr.splice(0, arr.length - BUF_CAP);
+  map.set(tabId, arr);
+}
+
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  const tabId = source.tabId;
+  if (tabId == null) return;
+  const p = params as any;
+  if (method === "Runtime.consoleAPICalled") {
+    const text = (p?.args ?? [])
+      .map((a: any) => a?.value ?? a?.description ?? "")
+      .join(" ")
+      .slice(0, 500);
+    pushCapped(consoleBuf, tabId, { level: p?.type ?? "log", text, ts: Date.now() });
+  } else if (method === "Runtime.exceptionThrown") {
+    const d = p?.exceptionDetails;
+    const text = (d?.exception?.description ?? d?.text ?? "exception").slice(0, 500);
+    pushCapped(consoleBuf, tabId, { level: "error", text, ts: Date.now() });
+  } else if (method === "Network.requestWillBeSent") {
+    pendingReqs.set(p?.requestId, {
+      method: p?.request?.method ?? "GET",
+      url: String(p?.request?.url ?? "").slice(0, 300),
+    });
+  } else if (method === "Network.responseReceived") {
+    const req = pendingReqs.get(p?.requestId);
+    pendingReqs.delete(p?.requestId);
+    pushCapped(networkBuf, tabId, {
+      method: req?.method ?? "GET",
+      url: req?.url ?? String(p?.response?.url ?? "").slice(0, 300),
+      status: p?.response?.status,
+      type: p?.type,
+      ts: Date.now(),
+    });
+  }
+});
+
 chrome.debugger.onDetach.addListener((source) => {
   if (source.tabId === attachedTabId) attachedTabId = null;
 });
+
+/** Detach immediately — the agent loop calls this when a turn finishes so
+ * Chrome's debugger bar doesn't linger after Eva is done. */
+export async function releaseDebugger(): Promise<void> {
+  if (detachTimer) clearTimeout(detachTimer);
+  await detachDebugger();
+}
 
 async function detachDebugger(): Promise<void> {
   if (attachedTabId == null) return;
@@ -116,9 +172,13 @@ async function cdp(tabId: number, method: string, params: object): Promise<unkno
       if (!String(err?.message ?? err).includes("Already attached")) throw err;
     });
     attachedTabId = tabId;
+    // Start collecting console + network while we're attached — powers the
+    // read_console / read_network tools with zero extra permissions.
+    void chrome.debugger.sendCommand({ tabId }, "Runtime.enable", {}).catch(() => {});
+    void chrome.debugger.sendCommand({ tabId }, "Network.enable", {}).catch(() => {});
   }
   if (detachTimer) clearTimeout(detachTimer);
-  detachTimer = setTimeout(() => void detachDebugger(), 2000);
+  detachTimer = setTimeout(() => void detachDebugger(), 10_000);
   return await chrome.debugger.sendCommand({ tabId }, method, params);
 }
 
@@ -608,16 +668,39 @@ const HANDLERS: Record<string, ToolHandler> = {
     return { result: r.value };
   },
 
-  async read_page() {
+  async read_page({ filter, max_chars }: { filter?: string; max_chars?: number } = {}) {
     const snapshot = await readActivePage();
+    const cap = Math.min(Math.max(max_chars ?? 40_000, 4_000), 100_000);
+
+    if (filter === "interactive") {
+      // Flat, token-lean list of things Eva can act on.
+      const INTERACTIVE = new Set([
+        "link", "button", "textbox", "combobox", "checkbox", "radio", "menuitem",
+        "menuitemcheckbox", "menuitemradio", "tab", "option", "searchbox",
+        "slider", "switch", "listbox", "submit", "select",
+      ]);
+      const out: unknown[] = [];
+      const walk = (n: any) => {
+        if (!n) return;
+        if (n.visible && (INTERACTIVE.has(n.role) || n.value !== undefined)) {
+          out.push({ id: n.id, role: n.role, name: n.name, value: n.value, bbox: n.bbox });
+        }
+        (n.children ?? []).forEach(walk);
+      };
+      walk(snapshot.root);
+      // Trim whole items until the payload fits the cap.
+      while (out.length > 0 && JSON.stringify(out).length > cap) {
+        out.splice(Math.floor(out.length * 0.8));
+      }
+      return { url: snapshot.url, title: snapshot.title, interactive: out };
+    }
+
     const json = JSON.stringify(snapshot);
-    // Webflow and other complex sites can produce enormous snapshots.
-    // Cap at 40K chars (~10K tokens) so a single read never blows the context.
-    if (json.length <= 40_000) return snapshot;
+    if (json.length <= cap) return snapshot;
     return {
       _truncated: true,
-      _note: "Page snapshot was too large and has been truncated to fit the context window. Focus on visible elements only.",
-      data: json.slice(0, 40_000),
+      _note: "Page snapshot was too large and has been truncated. Use filter: 'interactive' or the find tool for a leaner view.",
+      data: json.slice(0, cap),
     };
   },
 
@@ -636,6 +719,63 @@ const HANDLERS: Record<string, ToolHandler> = {
       };
     }
     return { matches };
+  },
+
+  /** Whole page as clean text — for reading/summarizing articles and docs. */
+  async get_page_text() {
+    return await textOfActivePage();
+  },
+
+  /**
+   * Fetch an image/file by URL (background fetch bypasses page CORS) and
+   * deliver it into a file input on the page — real uploads without a file
+   * picker. 6MB cap.
+   */
+  async upload_image({ element_id, url, filename }: { element_id: string; url: string; filename?: string }) {
+    requireString(element_id, "element_id");
+    requireString(url, "url");
+    if (!/^https?:\/\//i.test(url)) throw new Error("url must be http(s)");
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`fetch failed: HTTP ${res.status}`);
+    const blob = await res.blob();
+    if (blob.size > 6_000_000) throw new Error("file too large (max 6MB)");
+    const mime = blob.type || "application/octet-stream";
+    const name =
+      filename ??
+      (decodeURIComponent(new URL(url).pathname.split("/").pop() || "upload") || "upload");
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + 0x8000)));
+    }
+    return await setFileInActivePage(element_id, name, mime, btoa(binary));
+  },
+
+  /** Recent console output (log/warn/error) captured while Eva works. */
+  async read_console({ limit }: { limit?: number }) {
+    const tab = await getActiveTab();
+    if (tab.id === undefined) throw new Error("no active tab");
+    const entries = (consoleBuf.get(tab.id) ?? []).slice(-(limit ?? 40));
+    return entries.length
+      ? { entries }
+      : { entries: [], note: "No console output captured yet — it records while Eva is acting on the page. Interact first, then read again." };
+  },
+
+  /** Recent network requests captured while Eva works. */
+  async read_network({ filter, limit }: { filter?: string; limit?: number }) {
+    const tab = await getActiveTab();
+    if (tab.id === undefined) throw new Error("no active tab");
+    let entries = networkBuf.get(tab.id) ?? [];
+    if (filter) {
+      const f = filter.toLowerCase();
+      entries = entries.filter(
+        (e) => e.url.toLowerCase().includes(f) || String(e.status ?? "").startsWith(f),
+      );
+    }
+    entries = entries.slice(-(limit ?? 40));
+    return entries.length
+      ? { requests: entries }
+      : { requests: [], note: "No requests captured yet — recording happens while Eva acts on the page." };
   },
 
   async get_active_tab() {
@@ -703,12 +843,19 @@ const HANDLERS: Record<string, ToolHandler> = {
 
   async navigate({ url }: { url: string }) {
     requireString(url, "url");
-    if (!/^https?:\/\//i.test(url)) {
-      throw new Error("url must start with http:// or https://");
-    }
     const tab = await getActiveTab();
     if (tab.id === undefined) throw new Error("active tab has no id");
     const tabId = tab.id;
+    if (url === "back" || url === "forward") {
+      if (url === "back") await chrome.tabs.goBack(tabId);
+      else await chrome.tabs.goForward(tabId);
+      await new Promise((r) => setTimeout(r, 800));
+      const t = await chrome.tabs.get(tabId);
+      return { url: t.url ?? "", title: t.title ?? "", history: url };
+    }
+    if (!/^https?:\/\//i.test(url)) {
+      throw new Error('url must start with http:// or https:// (or be "back"/"forward")');
+    }
     return await navigateAndWait(tabId, url);
   },
 

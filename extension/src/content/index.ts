@@ -14,9 +14,11 @@ import { findElements } from "./find";
 import {
   click,
   formInput,
+  getPageText,
   rectOf,
   scroll,
   scrollTo,
+  setFileOnInput,
   StaleElementError,
   typeText,
   waitForSettle,
@@ -106,6 +108,13 @@ async function handle(req: PageRequest): Promise<PageResponse> {
       return { ok: true, result: rectOf(req.elementId) };
     case "page/find":
       return { ok: true, result: findElements(req.query) };
+    case "page/text":
+      return { ok: true, result: getPageText() };
+    case "page/setFile":
+      return {
+        ok: true,
+        result: setFileOnInput(req.elementId, req.name, req.mime, req.base64),
+      };
     case "page/waitFor":
       return { ok: true, result: await waitForSettle(req.timeoutMs) };
   }

@@ -178,6 +178,23 @@ export async function findInActivePage(query: string): Promise<unknown> {
   return await send(tab.id!, { type: "page/find", query });
 }
 
+/** Full readable page text (innerText), clipped at 60K chars. */
+export async function textOfActivePage(): Promise<unknown> {
+  const tab = await getActiveTab();
+  return await send(tab.id!, { type: "page/text" });
+}
+
+/** Deliver a fetched file into a file input on the page. */
+export async function setFileInActivePage(
+  elementId: string,
+  name: string,
+  mime: string,
+  base64: string,
+): Promise<unknown> {
+  const tab = await getActiveTab();
+  return await send(tab.id!, { type: "page/setFile", elementId, name, mime, base64 });
+}
+
 /** Wait until the DOM stops mutating (or timeout) — post-action settle. */
 export async function waitForSettleInActivePage(timeoutMs?: number): Promise<unknown> {
   const tab = await getActiveTab();

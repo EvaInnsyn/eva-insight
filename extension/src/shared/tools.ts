@@ -71,8 +71,62 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
   {
     name: "read_page",
     description:
-      "Read the currently active browser tab as a structured tree (headings, links, buttons, form fields, paragraphs). The FAST PATH on ordinary websites — prefer it over screenshots when the page has real DOM content. Each interactive element gets a short id (e.g. `e42`) usable with click/type. Ids reset when the page navigates. On canvas-based editors (Word Online, Google Docs, design tools) this sees little — use the computer tool there.",
+      "Read the active tab as a structured tree (headings, links, buttons, fields, text). Each interactive element gets a short id (e.g. `e42`) usable with click/hover/type. Pass filter: 'interactive' for a flat, token-lean list of just the actionable controls (with positions) — usually all you need. Ids reset when the page navigates. Canvas editors' document areas won't appear — their toolbars/menus will.",
+    input_schema: {
+      type: "object",
+      properties: {
+        filter: {
+          type: "string",
+          enum: ["interactive"],
+          description: "'interactive' returns only actionable elements as a flat list — cheaper and easier than the full tree.",
+        },
+        max_chars: { type: "number", description: "Response size cap (4000–100000, default 40000)." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "get_page_text",
+    description:
+      "The page's full readable text (like select-all copy) — for reading, summarizing, extracting from articles, docs and long pages. Much better than read_page when you need CONTENT rather than controls.",
     input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "upload_image",
+    description:
+      "Upload a file into a file-upload field on the page: fetches the given URL (image, PDF, …) and delivers it into the <input type='file'> element — no file picker involved. Find the file input's id first (find or read_page; they are often hidden near an 'Upload' button). Max 6MB.",
+    input_schema: {
+      type: "object",
+      properties: {
+        element_id: { type: "string", description: "Id of the input[type=file] element." },
+        url: { type: "string", description: "http(s) URL of the file to upload." },
+        filename: { type: "string", description: "Optional filename override, e.g. 'logo.png'." },
+      },
+      required: ["element_id", "url"],
+    },
+  },
+  {
+    name: "read_console",
+    description:
+      "Recent console output (logs, warnings, errors) from the page, recorded while Eva acts. Use when a page misbehaves or after an action silently fails — errors often say why.",
+    input_schema: {
+      type: "object",
+      properties: { limit: { type: "number", description: "Max entries (default 40)." } },
+      required: [],
+    },
+  },
+  {
+    name: "read_network",
+    description:
+      "Recent network requests (method, URL, status) from the page, recorded while Eva acts. Use to check whether a form/API call actually fired and what status it returned.",
+    input_schema: {
+      type: "object",
+      properties: {
+        filter: { type: "string", description: "Substring of URL, or status prefix like '4' / '500'." },
+        limit: { type: "number", description: "Max entries (default 40)." },
+      },
+      required: [],
+    },
   },
   {
     name: "get_active_tab",
@@ -146,7 +200,7 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
   {
     name: "navigate",
     description:
-      "Navigate the active tab to a URL. Waits for the page to load — take a screenshot or read_page afterwards.",
+      "Navigate the active tab to a URL, or pass \"back\" / \"forward\" to move through history. Waits for the page to load.",
     input_schema: {
       type: "object",
       properties: {
@@ -286,6 +340,11 @@ You control ONE browser tab — the user's active tab. The computer tool sees an
 
 ## When something doesn't work — switch strategy, never repeat
 Never try the same approach more than twice. The ladder: (1) keyboard shortcut, (2) find + click/hover by id, (3) computer-tool coordinates from a FRESH screenshot, (4) zoom to inspect then retry once, (5) javascript_eval (user approves). If a click changed nothing twice, the element probably isn't the right target — find again with different words. After two full strategy switches without progress, stop and tell the user precisely what you tried and where it sticks.
+
+## More powers
+- get_page_text reads a whole article/page as clean text — use it for summarizing or extracting, not read_page.
+- upload_image puts a file (by URL) straight into an upload field — find the input[type=file] id first; look near the Upload button.
+- read_console / read_network reveal what the page did after your actions — check them when something silently fails.
 
 ## Rules
 - The user already told you what to do. Start doing it. Never respond with "What do you need help with?" or any variation.
