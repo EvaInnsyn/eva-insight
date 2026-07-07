@@ -20,6 +20,7 @@ import {
   createUser,
   setUserPlan,
   getUserActivity,
+  monthUsageByModel,
   type User,
   type UserActivity,
 } from "../db.js";
@@ -99,12 +100,31 @@ function bar(used: number, cap: number, color: string): string {
   <small style="color:#999;font-size:11px">${used.toLocaleString()} / ${cap.toLocaleString()} (${pct}%)</small>`;
 }
 
-/** Sonnet 4.6 pricing — matches plans.ts assumptions. */
-const USD_PER_M_INPUT = 3;
-const USD_PER_M_OUTPUT = 15;
+/** $ per 1M tokens [input, output]. Unknown/legacy (null) rows use Sonnet. */
+const MODEL_PRICES: Record<string, [number, number]> = {
+  "claude-opus-4-8": [5, 25],
+  "claude-opus-4-7": [5, 25],
+  "claude-opus-4-6": [5, 25],
+  "claude-sonnet-4-6": [3, 15],
+  "claude-haiku-4-5-20251001": [1, 5],
+};
+const DEFAULT_PRICE: [number, number] = [3, 15];
 
+function priceOf(model: string | null): [number, number] {
+  return (model && MODEL_PRICES[model]) || DEFAULT_PRICE;
+}
+
+/** Month-to-date cost from the activity log, priced per actual model. */
+function monthCostUsd(userId?: string): number {
+  return monthUsageByModel(userId).reduce((sum, row) => {
+    const [inP, outP] = priceOf(row.model);
+    return sum + (row.input_tokens / 1e6) * inP + (row.output_tokens / 1e6) * outP;
+  }, 0);
+}
+
+/** Fallback pricing for period counters that predate per-model logging. */
 function estUsd(inputTokens: number, outputTokens: number): number {
-  return (inputTokens / 1e6) * USD_PER_M_INPUT + (outputTokens / 1e6) * USD_PER_M_OUTPUT;
+  return (inputTokens / 1e6) * DEFAULT_PRICE[0] + (outputTokens / 1e6) * DEFAULT_PRICE[1];
 }
 
 const PLAN_COLORS: Record<PlanId, string> = {
@@ -184,7 +204,7 @@ function rows(users: User[]): string {
       <td style="padding:14px 16px">${activityCell(activity)}</td>
       <td style="padding:14px 16px">${bar(u.period_input_tokens, u.monthly_cap_input_tokens, "#6b1a2e")}</td>
       <td style="padding:14px 16px">${bar(u.period_output_tokens, u.monthly_cap_output_tokens, "#7b3fc4")}</td>
-      <td style="padding:14px 16px;font-size:12px;color:#555">$${estUsd(u.period_input_tokens, u.period_output_tokens).toFixed(2)}</td>
+      <td style="padding:14px 16px;font-size:12px;color:#555">$${monthCostUsd(u.id).toFixed(2)}</td>
       <td style="padding:14px 16px">
         ${
           !revoked
@@ -215,7 +235,9 @@ function summaryHtml(users: User[]): string {
   const active = users.filter((u) => !u.revoked_at);
   const inTok = active.reduce((s, u) => s + u.period_input_tokens, 0);
   const outTok = active.reduce((s, u) => s + u.period_output_tokens, 0);
-  const cost = estUsd(inTok, outTok);
+  const eventCost = monthCostUsd();
+  // Event log starts 2026-07-07; period counters may predate it — show the max.
+  const cost = Math.max(eventCost, estUsd(inTok, outTok));
   const revenueIsk = active.reduce((s, u) => s + (PLANS[u.plan]?.priceIsk ?? 0), 0);
   const stat = (label: string, value: string, sub?: string) =>
     `<div style="background:white;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.06);padding:16px 20px;min-width:170px">
@@ -224,7 +246,7 @@ function summaryHtml(users: User[]): string {
       ${sub ? `<div style="font-size:11px;color:#aaa;margin-top:2px">${sub}</div>` : ""}
     </div>`;
   return `<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:26px">
-    ${stat("Est. API cost this month", `$${cost.toFixed(2)}`, "Sonnet 4.6 rates — check vs Anthropic credits")}
+    ${stat("Est. API cost this month", `$${cost.toFixed(2)}`, "priced per actual model — check vs Anthropic credits")}
     ${stat("Plan revenue / month", `${revenueIsk.toLocaleString()} kr`, `${active.length} active user${active.length === 1 ? "" : "s"}`)}
     ${stat("Tokens this month", `${(inTok / 1e6).toFixed(1)}M in`, `${(outTok / 1e6).toFixed(2)}M out`)}
   </div>`;

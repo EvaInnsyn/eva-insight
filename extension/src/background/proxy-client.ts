@@ -13,6 +13,13 @@
 
 import type { ChatStopInfo, ProxyMessage } from "../shared/chat";
 import { EVA_TOOL_BETAS, type ToolSchema } from "../shared/tools";
+
+/**
+ * Extension tasks run on Opus — Vigdís's call (2026-07-07): quality over
+ * margin; prices get revisited. The platform chat panel stays on the
+ * server's default (Sonnet) — it doesn't need Opus.
+ */
+export const EXTENSION_MODEL = "claude-opus-4-8";
 import { parseSseStream } from "./sse";
 import type { EvaSettings } from "./settings";
 
@@ -41,6 +48,14 @@ export interface RunChatArgs {
   signal: AbortSignal;
   onTextDelta: (text: string) => void;
   onToolUseStart?: (block: ToolUseBlock) => void;
+  /** Model override; defaults to EXTENSION_MODEL. */
+  model?: string;
+  /** Beta flags; defaults to the computer-use beta. Pass [] for plain calls. */
+  betas?: string[];
+  /** "off" omits the thinking param (needed for Haiku helper calls). */
+  thinking?: "adaptive" | "off";
+  /** Output cap; defaults to 32768. */
+  maxTokens?: number;
 }
 
 export interface RunChatResult {
@@ -98,12 +113,13 @@ export async function runChat(args: RunChatArgs): Promise<RunChatResult> {
       Authorization: `Bearer ${bearerToken}`,
     },
     body: JSON.stringify({
+      model: args.model ?? EXTENSION_MODEL,
       system,
       messages,
       tools,
-      betas: EVA_TOOL_BETAS,
-      thinking: { type: "adaptive" },
-      max_tokens: 32768,
+      betas: args.betas ?? EVA_TOOL_BETAS,
+      ...(args.thinking === "off" ? {} : { thinking: { type: "adaptive" } }),
+      max_tokens: args.maxTokens ?? 32768,
     }),
     signal,
   });

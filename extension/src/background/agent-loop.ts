@@ -7,7 +7,7 @@
  * hit MAX_TOOL_ROUNDS.
  */
 
-import { runTool, probeDisplayDims, releaseDebugger } from "./tools";
+import { runTool, probeDisplayDims, releaseDebugger, setToolAuthContext } from "./tools";
 import {
   ProxyError,
   runChat,
@@ -236,6 +236,8 @@ export async function runAgentLoop(
   // model's coordinates match the screenshots exactly. Once per run.
   const display = await probeDisplayDims();
   const tools = buildEvaTools(display);
+  // Deep find calls the proxy itself — give tools this run's auth.
+  setToolAuthContext({ settings, accessToken: accessToken ?? null });
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (signal.aborted) break;
@@ -352,6 +354,7 @@ export async function runAgentLoop(
 
   // Drop the CDP session promptly so Chrome's debugger bar clears when Eva
   // finishes instead of lingering for the idle timeout.
+  setToolAuthContext(null);
   await releaseDebugger().catch(() => {});
 
   return { info: lastInfo, messages, paused };

@@ -149,7 +149,7 @@ chatRoute.post("/", async (c) => {
       } finally {
         if (user && (inputTokens > 0 || outputTokens > 0)) {
           try {
-            recordUsage(user.id, inputTokens, outputTokens, usageSource);
+            recordUsage(user.id, inputTokens, outputTokens, usageSource, model);
           } catch (e) {
             console.error("[eva-insight] failed to record usage", e);
           }

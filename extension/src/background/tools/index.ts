@@ -28,8 +28,93 @@ import {
   typeInActivePage,
   waitForSettleInActivePage,
 } from "../page-bridge";
+import { runChat } from "../proxy-client";
+import type { EvaSettings } from "../settings";
 
 export type ToolHandler = (input: any) => Promise<unknown>;
+
+// ── Auth context (set per agent run) ─────────────────────────────────────────
+// Some tools (deep find) call the proxy themselves and need the run's auth.
+let authCtx: { settings: EvaSettings; accessToken: string | null } | null = null;
+export function setToolAuthContext(
+  ctx: { settings: EvaSettings; accessToken: string | null } | null,
+): void {
+  authCtx = ctx;
+}
+
+/** Cheap model for micro-decisions (element matching). Exact pinned id. */
+const HELPER_MODEL = "claude-haiku-4-5-20251001";
+
+/**
+ * Model-backed element matching: give Haiku the page's interactive elements
+ * and the query; it picks the best ids. Used when lexical find comes up
+ * empty (or on find{deep:true}) — understands MEANING, not just words
+ * ("cancel subscription" → the "No thanks, keep paying" button).
+ */
+async function deepFind(query: string): Promise<unknown> {
+  if (!authCtx) throw new Error("deep find unavailable (no auth context)");
+  const snapshot = await readActivePage();
+  const items: { id: string; role: string; name?: string; value?: string; cx?: number; cy?: number }[] = [];
+  const INTERACTIVE = new Set([
+    "link", "button", "textbox", "combobox", "checkbox", "radio", "menuitem",
+    "menuitemcheckbox", "menuitemradio", "tab", "option", "searchbox",
+    "slider", "switch", "listbox", "submit", "select",
+  ]);
+  const walk = (n: any) => {
+    if (!n) return;
+    if (n.visible && (INTERACTIVE.has(n.role) || n.value !== undefined)) {
+      items.push({
+        id: n.id, role: n.role,
+        name: typeof n.name === "string" ? n.name.slice(0, 60) : undefined,
+        value: typeof n.value === "string" ? n.value.slice(0, 30) : undefined,
+        cx: n.bbox ? Math.round(n.bbox.x + n.bbox.w / 2) : undefined,
+        cy: n.bbox ? Math.round(n.bbox.y + n.bbox.h / 2) : undefined,
+      });
+    }
+    (n.children ?? []).forEach(walk);
+  };
+  walk(snapshot.root);
+  while (items.length > 0 && JSON.stringify(items).length > 14_000) {
+    items.splice(Math.floor(items.length * 0.85));
+  }
+  if (items.length === 0) return { matches: [], method: "model", note: "no interactive elements on page" };
+
+  const result = await runChat({
+    settings: authCtx.settings,
+    accessToken: authCtx.accessToken,
+    model: HELPER_MODEL,
+    betas: [],
+    thinking: "off",
+    maxTokens: 200,
+    system:
+      'You match UI elements to a request. Reply with ONLY a JSON array of up to 3 element id strings, best match first, e.g. ["e12","e88"]. Reply [] if nothing plausibly matches.',
+    messages: [
+      {
+        role: "user",
+        content: `Request: ${query}
+
+Elements:
+${JSON.stringify(items)}`,
+      },
+    ],
+    tools: [],
+    signal: new AbortController().signal,
+    onTextDelta: () => {},
+  });
+
+  const m = result.text.match(/\[[^\]]*\]/);
+  let ids: string[] = [];
+  try {
+    ids = m ? (JSON.parse(m[0]) as string[]).filter((x) => typeof x === "string") : [];
+  } catch {
+    ids = [];
+  }
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const matches = ids.map((id) => byId.get(id)).filter(Boolean);
+  return matches.length
+    ? { matches, method: "model" }
+    : { matches: [], method: "model", note: "AI matcher found nothing either — the target may be in a canvas area; try a screenshot." };
+}
 
 // ── Screenshot sizing ─────────────────────────────────────────────────────────
 
@@ -776,16 +861,27 @@ const HANDLERS: Record<string, ToolHandler> = {
    * Lexend". Returns ranked matches with ids (for click/hover/type) and
    * measured centers. Far cheaper and more precise than a full read_page.
    */
-  async find({ query }: { query: string }) {
+  async find({ query, deep }: { query: string; deep?: boolean }) {
     requireString(query, "query");
+    if (deep === true && authCtx) {
+      return await deepFind(query);
+    }
     const matches = await findInActivePage(query);
     if (Array.isArray(matches) && matches.length === 0) {
+      // Word search missed — let the AI matcher try meaning before giving up.
+      if (authCtx) {
+        try {
+          return await deepFind(query);
+        } catch {
+          // fall through to the plain empty result
+        }
+      }
       return {
         matches: [],
         note: "No visible element matched. Try different words, read_page for the full tree, or a screenshot if this is a canvas area.",
       };
     }
-    return { matches };
+    return { matches, method: "lexical" };
   },
 
   /** Whole page as clean text — for reading/summarizing articles and docs. */

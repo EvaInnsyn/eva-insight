@@ -79,6 +79,11 @@ export function initDb(filepath = "data/eva.db"): Database.Database {
     CREATE INDEX IF NOT EXISTS usage_events_user_ts ON usage_events(user_id, ts);
     CREATE INDEX IF NOT EXISTS usage_events_ts ON usage_events(ts);
   `);
+  const evCols = db.prepare("PRAGMA table_info(usage_events)").all() as { name: string }[];
+  if (!evCols.some((c) => c.name === "model")) {
+    db.exec(`ALTER TABLE usage_events ADD COLUMN model TEXT;`);
+  }
+
   // Keep 90 days — plenty for weekly/monthly stats, keeps the file small.
   db.prepare("DELETE FROM usage_events WHERE ts < datetime('now', '-90 days')").run();
 
@@ -253,6 +258,7 @@ export function recordUsage(
   inputTokens: number,
   outputTokens: number,
   source: "extension" | "platform" = "extension",
+  model?: string,
 ): void {
   getDb()
     .prepare(
@@ -264,10 +270,35 @@ export function recordUsage(
     .run(inputTokens, outputTokens, userId);
   getDb()
     .prepare(
-      `INSERT INTO usage_events (user_id, ts, source, input_tokens, output_tokens)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO usage_events (user_id, ts, source, input_tokens, output_tokens, model)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
-    .run(userId, new Date().toISOString(), source, inputTokens, outputTokens);
+    .run(userId, new Date().toISOString(), source, inputTokens, outputTokens, model ?? null);
+}
+
+/** Per-model token totals for the current calendar month (UTC). */
+export interface ModelUsageRow {
+  model: string | null;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+export function monthUsageByModel(userId?: string): ModelUsageRow[] {
+  const monthStart = `${currentPeriodKey()}-01T00:00:00.000Z`;
+  if (userId) {
+    return getDb()
+      .prepare<[string, string], ModelUsageRow>(
+        `SELECT model, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens
+         FROM usage_events WHERE user_id = ? AND ts >= ? GROUP BY model`,
+      )
+      .all(userId, monthStart);
+  }
+  return getDb()
+    .prepare<[string], ModelUsageRow>(
+      `SELECT model, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens
+       FROM usage_events WHERE ts >= ? GROUP BY model`,
+    )
+    .all(monthStart);
 }
 
 // --- Activity stats (admin dashboard) ---------------------------------

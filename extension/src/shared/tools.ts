@@ -64,6 +64,10 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
           type: "string",
           description: "What you're looking for, in a few words. Include the widget kind when known (button, field, dropdown, menu item).",
         },
+        deep: {
+          type: "boolean",
+          description: "Force AI matching (understands meaning, e.g. finds the decline button whatever it's labelled). Slightly slower. Auto-engages when word search misses.",
+        },
       },
       required: ["query"],
     },
