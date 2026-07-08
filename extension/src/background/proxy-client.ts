@@ -92,6 +92,59 @@ interface BlockState {
   signatureBuf?: string;
 }
 
+/** Eva's lasting per-user memory, stored on the proxy. Best-effort reads. */
+export async function fetchMemory(
+  settings: EvaSettings,
+  accessToken: string | null,
+  timeoutMs = 2000,
+): Promise<string> {
+  const bearerToken = accessToken ?? settings.sharedSecret;
+  if (!settings.proxyUrl || !bearerToken) return "";
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const url = new URL("/v1/memory", settings.proxyUrl).toString();
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${bearerToken}` },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return "";
+    const data = (await res.json()) as { content?: string };
+    return typeof data.content === "string" ? data.content : "";
+  } catch {
+    return ""; // memory must never block or fail a run
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function saveMemory(
+  settings: EvaSettings,
+  accessToken: string | null,
+  content: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const bearerToken = accessToken ?? settings.sharedSecret;
+  if (!settings.proxyUrl || !bearerToken) return { ok: false, error: "not connected" };
+  const url = new URL("/v1/memory", settings.proxyUrl).toString();
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${bearerToken}`,
+    },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const data = (await res.json()) as { error?: { message?: string } };
+      if (data.error?.message) msg = data.error.message;
+    } catch { /* keep status */ }
+    return { ok: false, error: msg };
+  }
+  return { ok: true };
+}
+
 export async function runChat(args: RunChatArgs): Promise<RunChatResult> {
   const {
     settings,

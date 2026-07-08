@@ -227,25 +227,54 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
     },
   },
   {
+    name: "remember",
+    description:
+      "Save Eva's lasting memory about this user and their business — injected into every future conversation. FULL REPLACEMENT: compose the complete updated note (your current memory arrives in [auto context]; keep what holds, add the new, drop the stale). For durable facts only: business name & industry, their sites/platforms, brand voice, preferences, recurring workflows. NEVER passwords, payment details, or one-off task details. Compact structured note, max ~5500 chars. The user can view and edit it in Settings.",
+    input_schema: {
+      type: "object",
+      properties: {
+        content: {
+          type: "string",
+          description: "The complete updated memory note (replaces the previous one).",
+        },
+      },
+      required: ["content"],
+    },
+  },
+  {
     name: "tabs_list",
     description: "List open tabs in the current window (id, url, title, active).",
     input_schema: { type: "object", properties: {}, required: [] },
   },
   {
     name: "tabs_create",
-    description: "Open a new tab at the given URL. The new tab becomes your task tab.",
+    description:
+      "Open a new tab at the given URL. The new tab becomes your task tab. Pass background:true to open it WITHOUT disturbing the user's view — you keep working in it invisibly (screenshots and all tools still work).",
     input_schema: {
       type: "object",
-      properties: { url: { type: "string" } },
+      properties: {
+        url: { type: "string" },
+        background: {
+          type: "boolean",
+          description: "Open without focusing — work there invisibly while the user's view stays put.",
+        },
+      },
       required: ["url"],
     },
   },
   {
     name: "tabs_switch",
-    description: "Make the given tab id (from tabs_list) your task tab and bring it forward.",
+    description:
+      "Make the given tab id (from tabs_list) your task tab and bring it forward. Pass background:true to move your binding WITHOUT focusing the tab (the user's view stays put).",
     input_schema: {
       type: "object",
-      properties: { tab_id: { type: "number" } },
+      properties: {
+        tab_id: { type: "number" },
+        background: {
+          type: "boolean",
+          description: "Move the binding only — don't bring the tab forward.",
+        },
+      },
       required: ["tab_id"],
     },
   },
@@ -352,6 +381,11 @@ Never try the same approach more than twice. The ladder: (1) keyboard shortcut, 
 - get_page_text reads a whole article/page as clean text — use it for summarizing or extracting, not read_page.
 - upload_image puts a file (by URL) straight into an upload field — find the input[type=file] id first; look near the Upload button.
 - read_console / read_network reveal what the page did after your actions — check them when something silently fails.
+- Your first user message includes [auto context] with your tab's title and URL — you already know where you are; don't call get_active_tab or take an orientation screenshot to find out.
+- **Research side-quests without disturbing the user:** tabs_create {background:true} opens a tab the user never sees focused — your binding follows it; gather what you need (get_page_text, find), then tabs_switch back with {background:true} and finish the original task. tabs_list marks your bound tab with your_task_tab. If a background page renders empty (some sites lazy-load only when visible), tabs_switch to it normally to bring it forward.
+
+## Memory
+[auto context] may carry "Eva's saved memory" — durable facts about this user and their business. Use them silently; don't recite them back. When you learn a LASTING fact (their business, their sites, preferences, how they like things done), call remember ONCE near the end of the task with the full updated note — merge new into old, drop stale lines. Never store secrets, passwords or payment details. Don't announce that you're saving; just do it.
 
 ## Rules
 - The user already told you what to do. Start doing it. Never respond with "What do you need help with?" or any variation.

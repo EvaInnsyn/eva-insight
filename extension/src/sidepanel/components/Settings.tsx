@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useUsage } from "../hooks/useUsage";
 import { usePlatformAuth } from "../hooks/usePlatformAuth";
 import { UsageBar } from "./UsageBar";
@@ -66,6 +66,37 @@ export function Settings({ open, onClose }: Props) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [draft, setDraft] = useState<SettingsT>(settings);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [memory, setMemory] = useState<string | null>(null); // null = not loaded
+  const [memoryBusy, setMemoryBusy] = useState(false);
+  const [memoryMsg, setMemoryMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open || !platform.status.connected) return;
+    setMemory(null);
+    chrome.runtime
+      .sendMessage({ type: "memory/get" })
+      .then((res: { ok?: boolean; content?: string }) => {
+        setMemory(res?.ok ? (res.content ?? "") : "");
+      })
+      .catch(() => setMemory(""));
+  }, [open, platform.status.connected]);
+
+  const saveMemoryDraft = async (content: string) => {
+    setMemoryBusy(true);
+    setMemoryMsg(null);
+    try {
+      const res = (await chrome.runtime.sendMessage({
+        type: "memory/set",
+        content,
+      })) as { ok?: boolean; error?: string };
+      setMemoryMsg(res?.ok ? "Vistað ✓" : (res?.error ?? "Villa við vistun"));
+      if (res?.ok) setMemory(content);
+    } catch (err) {
+      setMemoryMsg(err instanceof Error ? err.message : "Villa við vistun");
+    } finally {
+      setMemoryBusy(false);
+    }
+  };
 
   if (!open) return null;
 
@@ -156,6 +187,55 @@ export function Settings({ open, onClose }: Props) {
             </div>
           )}
         </div>
+
+        {/* ── Eva's memory ── */}
+        {platform.status.connected && (
+          <div className="eva-field">
+            <span className="eva-field-label">Minni Evu</span>
+            <span style={{ color: "#888780", fontSize: 11 }}>
+              Eva man þetta á milli samtala — um fyrirtækið þitt, síðurnar
+              þínar og hvernig þú vilt hafa hlutina. Hún uppfærir það sjálf;
+              þú mátt breyta eða hreinsa.
+            </span>
+            {memory === null ? (
+              <span style={{ color: "#888780", fontSize: 12 }}>Sæki…</span>
+            ) : (
+              <>
+                <textarea
+                  className="eva-text"
+                  value={memory}
+                  rows={5}
+                  style={{ resize: "vertical", fontSize: 12, lineHeight: 1.4 }}
+                  onChange={(e) => setMemory(e.target.value)}
+                  placeholder="Ekkert vistað enn — Eva bætir við þegar hún kynnist þér."
+                />
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <button
+                    type="button"
+                    className="eva-btn-primary"
+                    disabled={memoryBusy}
+                    onClick={() => saveMemoryDraft(memory)}
+                    style={{ fontSize: 12 }}
+                  >
+                    {memoryBusy ? "Vista…" : "Vista"}
+                  </button>
+                  <button
+                    type="button"
+                    className="eva-link"
+                    disabled={memoryBusy}
+                    onClick={() => saveMemoryDraft("")}
+                    style={{ fontSize: 12 }}
+                  >
+                    Hreinsa
+                  </button>
+                  {memoryMsg && (
+                    <span style={{ fontSize: 11, color: "#888780" }}>{memoryMsg}</span>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         {/* ── Always-allowed domains ── */}
         {draft.allowedDomains.length > 0 && (

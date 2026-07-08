@@ -87,6 +87,17 @@ export function initDb(filepath = "data/eva.db"): Database.Database {
   // Keep 90 days — plenty for weekly/monthly stats, keeps the file small.
   db.prepare("DELETE FROM usage_events WHERE ts < datetime('now', '-90 days')").run();
 
+  // Eva's lasting memory per user — one compact note (business facts,
+  // preferences, recurring sites) the extension injects into every run.
+  // User-visible and editable in the side panel; content only, no history.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_memories (
+      user_id TEXT PRIMARY KEY,
+      content TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL
+    );
+  `);
+
   return db;
 }
 
@@ -370,6 +381,26 @@ export function getUserActivity(userId: string): UserActivity {
 }
 
 /** Returns true when the user has hit either cap. */
+export const MEMORY_MAX_CHARS = 6000;
+
+export function getMemory(userId: string): { content: string; updated_at: string | null } {
+  const row = getDb()
+    .prepare("SELECT content, updated_at FROM user_memories WHERE user_id = ?")
+    .get(userId) as { content: string; updated_at: string } | undefined;
+  return row ?? { content: "", updated_at: null };
+}
+
+export function setMemory(userId: string, content: string): void {
+  const clipped = content.slice(0, MEMORY_MAX_CHARS);
+  getDb()
+    .prepare(
+      `INSERT INTO user_memories (user_id, content, updated_at)
+       VALUES (?, ?, datetime('now'))
+       ON CONFLICT(user_id) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at`,
+    )
+    .run(userId, clipped);
+}
+
 export function overCap(user: User): boolean {
   return (
     user.period_input_tokens >= user.monthly_cap_input_tokens ||

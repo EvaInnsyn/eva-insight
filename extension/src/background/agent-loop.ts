@@ -10,7 +10,7 @@
 import { runTool, probeDisplayDims, releaseDebugger, setToolAuthContext } from "./tools";
 import {
   ProxyError,
-  runChat,
+  fetchMemory, runChat,
   type ProxyMessage,
   type ToolUseBlock,
 } from "./proxy-client";
@@ -295,6 +295,40 @@ export async function runAgentLoop(
     bindTaskTab(startTab.id ?? null);
   } catch {
     bindTaskTab(null); // no usable tab yet — first tool call rebinds
+  }
+
+  // Hand the model its context up-front: tab title/URL (kills the
+  // get_active_tab round that opens nearly every task) and Eva's lasting
+  // memory about this user (proxy-stored, user-editable in Settings).
+  // Injected only into the OUTGOING copy; panel history never sees it.
+  {
+    const memoryPromise = fetchMemory(settings, accessToken ?? null);
+    let ctx = "";
+    try {
+      const tab = await getTaskTab();
+      if (tab.url) {
+        ctx += `\n\n[auto context] Your task tab: "${(tab.title ?? "").slice(0, 120)}" — ${tab.url.slice(0, 300)}`;
+      }
+    } catch {
+      // protected page or no tab — the model discovers context via tools
+    }
+    const memory = await memoryPromise;
+    if (memory) {
+      ctx += `\n\n[auto context] Eva's saved memory about this user (keep current via the remember tool):\n${memory}`;
+    }
+    if (ctx) {
+      const last = messages[messages.length - 1];
+      if (last && last.role === "user") {
+        if (typeof last.content === "string") {
+          messages[messages.length - 1] = { ...last, content: last.content + ctx };
+        } else if (Array.isArray(last.content)) {
+          messages[messages.length - 1] = {
+            ...last,
+            content: [...last.content, { type: "text", text: ctx.trim() }],
+          };
+        }
+      }
+    }
   }
 
   // Declare the computer tool's display size from the live viewport so the

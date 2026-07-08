@@ -16,7 +16,7 @@ import {
 } from "../shared/messages";
 import type { ChatMessage, ProxyMessage } from "../shared/chat";
 import { readSettings } from "./settings";
-import { ProxyError } from "./proxy-client";
+import { fetchMemory, saveMemory, ProxyError } from "./proxy-client";
 import { runAgentLoop } from "./agent-loop";
 import { loadHistory, saveHistory } from "./session-store";
 import {
@@ -358,6 +358,35 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           },
         }),
       );
+    return true;
+  }
+
+  // Eva's lasting memory: panel Settings reads/writes via the background,
+  // which holds the live platform token (panel only has the shared secret).
+  if (m.type === "memory/get") {
+    (async () => {
+      const settings = await readSettings();
+      const accessToken = await getAccessToken();
+      const content = await fetchMemory(settings, accessToken ?? null);
+      sendResponse({ ok: true, content });
+    })().catch((err) =>
+      sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }),
+    );
+    return true;
+  }
+  if (m.type === "memory/set") {
+    (async () => {
+      const settings = await readSettings();
+      const accessToken = await getAccessToken();
+      const res = await saveMemory(
+        settings,
+        accessToken ?? null,
+        String((message as { content?: string }).content ?? ""),
+      );
+      sendResponse(res.ok ? { ok: true } : { ok: false, error: res.error });
+    })().catch((err) =>
+      sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }),
+    );
     return true;
   }
 

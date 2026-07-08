@@ -16,6 +16,7 @@
 
 import {
   bindTaskTab,
+  boundTaskTabId,
   clickInActivePage,
   findInActivePage,
   formInputInActivePage,
@@ -29,7 +30,7 @@ import {
   typeInActivePage,
   waitForSettleInActivePage,
 } from "../page-bridge";
-import { runChat } from "../proxy-client";
+import { runChat, saveMemory } from "../proxy-client";
 import type { EvaSettings } from "../settings";
 
 export type ToolHandler = (input: any) => Promise<unknown>;
@@ -1255,6 +1256,18 @@ const HANDLERS: Record<string, ToolHandler> = {
       : { requests: [], note: "No requests captured yet — recording happens while Eva acts on the page." };
   },
 
+  /**
+   * Replace Eva's lasting memory about this user (business facts, sites,
+   * preferences). Injected into every future run; user-editable in Settings.
+   */
+  async remember({ content }: { content: string }) {
+    requireString(content, "content");
+    if (!authCtx) throw new Error("memory unavailable (no auth context)");
+    const res = await saveMemory(authCtx.settings, authCtx.accessToken, content);
+    if (!res.ok) throw new Error(`could not save memory: ${res.error}`);
+    return { saved: true, chars: content.length };
+  },
+
   async get_active_tab() {
     const tab = await getTaskTab();
     return {
@@ -1353,27 +1366,41 @@ const HANDLERS: Record<string, ToolHandler> = {
 
   async tabs_list() {
     const tabs = await chrome.tabs.query({ currentWindow: true });
+    const bound = boundTaskTabId();
     return tabs.map((t) => ({
       id: t.id,
       url: t.url,
       title: t.title,
       active: t.active,
       pinned: t.pinned,
+      ...(t.id !== undefined && t.id === bound ? { your_task_tab: true } : {}),
     }));
   },
 
-  async tabs_create({ url }: { url: string }) {
+  async tabs_create({ url, background }: { url: string; background?: boolean }) {
     requireString(url, "url");
     if (!/^https?:\/\//i.test(url)) {
       throw new Error("url must start with http:// or https://");
     }
-    const tab = await chrome.tabs.create({ url, active: true });
+    // background:true opens the tab WITHOUT stealing the user's view — Eva's
+    // binding moves there and she works via CDP capture, invisibly.
+    const tab = await chrome.tabs.create({ url, active: background !== true });
     if (tab.id !== undefined) bindTaskTab(tab.id);
-    return { id: tab.id, url: tab.url ?? url };
+    return {
+      id: tab.id,
+      url: tab.url ?? url,
+      ...(background === true ? { note: "opened in background — you're bound to it; the user's view is undisturbed" } : {}),
+    };
   },
 
-  async tabs_switch({ tab_id }: { tab_id: number }) {
+  async tabs_switch({ tab_id, background }: { tab_id: number; background?: boolean }) {
     if (typeof tab_id !== "number") throw new Error("tab_id must be a number");
+    if (background === true) {
+      // Just move the binding — don't yank the user's view around.
+      const tab = await chrome.tabs.get(tab_id);
+      bindTaskTab(tab_id);
+      return { id: tab.id, url: tab.url, note: "binding moved without focusing the tab" };
+    }
     const tab = await chrome.tabs.update(tab_id, { active: true });
     if (tab.windowId !== undefined) {
       await chrome.windows.update(tab.windowId, { focused: true });
