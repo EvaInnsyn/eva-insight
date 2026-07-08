@@ -557,20 +557,49 @@ function modsFromText(text?: string): number {
   return text.split("+").reduce((acc, p) => acc | (MOD_BITS[p.trim().toLowerCase()] ?? 0), 0);
 }
 
-async function mouseMove(tabId: number, x: number, y: number, modifiers = 0): Promise<void> {
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Held-buttons bitmask (CDP `buttons`): pages read e.buttons in drag/gesture code. */
+const BUTTON_BITS: Record<string, number> = { left: 1, right: 2, middle: 4, none: 0 };
+
+async function mouseMove(
+  tabId: number, x: number, y: number, modifiers = 0, buttonsHeld = 0,
+): Promise<void> {
   await cdp(tabId, "Input.dispatchMouseEvent", {
-    type: "mouseMoved", x, y, button: "none", clickCount: 0, modifiers,
+    type: "mouseMoved", x: Math.round(x), y: Math.round(y),
+    button: buttonsHeld ? "left" : "none", clickCount: 0, modifiers,
+    buttons: buttonsHeld, ...(buttonsHeld ? { force: 0.5 } : {}),
   });
 }
 
+/**
+ * Click choreography mirroring the reference build: hover first + 100ms dwell
+ * (hover handlers register the pointer before the press), 12ms press-hold,
+ * and multi-clicks as FULL press/release pairs with ascending clickCount —
+ * double/triple-click detectors need the real pairs, not one clickCount:3
+ * event. `buttons` bitmask set while pressed, cleared on release.
+ */
 async function mouseClick(
   tabId: number, x: number, y: number,
   button: Button, clickCount: number, modifiers = 0,
 ): Promise<void> {
-  await mouseMove(tabId, x, y, modifiers);
-  const base = { x, y, button, clickCount, modifiers };
-  await cdp(tabId, "Input.dispatchMouseEvent", { ...base, type: "mousePressed" });
-  await cdp(tabId, "Input.dispatchMouseEvent", { ...base, type: "mouseReleased" });
+  const px = Math.round(x);
+  const py = Math.round(y);
+  const bits = BUTTON_BITS[button] ?? 1;
+  await mouseMove(tabId, px, py, modifiers);
+  await sleep(100);
+  for (let u = 1; u <= clickCount; u++) {
+    await cdp(tabId, "Input.dispatchMouseEvent", {
+      type: "mousePressed", x: px, y: py, button, clickCount: u, modifiers,
+      buttons: bits, force: 0.5,
+    });
+    await sleep(12);
+    await cdp(tabId, "Input.dispatchMouseEvent", {
+      type: "mouseReleased", x: px, y: py, button, clickCount: u, modifiers,
+      buttons: 0,
+    });
+    if (u < clickCount) await sleep(100);
+  }
 }
 
 async function mouseDrag(
@@ -580,21 +609,144 @@ async function mouseDrag(
   modifiers = 0,
 ): Promise<void> {
   await mouseMove(tabId, from.x, from.y, modifiers);
+  await sleep(100); // hover dwell — target registers the pointer first
   await cdp(tabId, "Input.dispatchMouseEvent", {
-    type: "mousePressed", x: from.x, y: from.y, button: "left", clickCount: 1, modifiers,
+    type: "mousePressed", x: Math.round(from.x), y: Math.round(from.y),
+    button: "left", clickCount: 1, modifiers, buttons: 1, force: 0.5,
   });
   // Intermediate moves so drag-aware UIs (selections, sliders) track properly.
+  // buttons:1 the whole way — pages track e.buttons to know the drag is live.
   const steps = 12;
   for (let i = 1; i <= steps; i++) {
     const x = Math.round(from.x + ((to.x - from.x) * i) / steps);
     const y = Math.round(from.y + ((to.y - from.y) * i) / steps);
     await cdp(tabId, "Input.dispatchMouseEvent", {
       type: "mouseMoved", x, y, button: "left", clickCount: 0, modifiers,
+      buttons: 1, force: 0.5,
     });
   }
   await cdp(tabId, "Input.dispatchMouseEvent", {
-    type: "mouseReleased", x: to.x, y: to.y, button: "left", clickCount: 1, modifiers,
+    type: "mouseReleased", x: Math.round(to.x), y: Math.round(to.y),
+    button: "left", clickCount: 1, modifiers, buttons: 0,
   });
+}
+
+// ── Verified scrolling ───────────────────────────────────────────────────────
+// A CDP mouseWheel gets swallowed by some custom scroll containers, and does
+// nothing reliable in background tabs. Reference behavior: check whether
+// anything actually moved; if not, scroll the scrollable ancestor at the
+// point directly via the DOM.
+
+/** Serialized into the page: scroll offsets of window + ancestor at (x,y). */
+function scrollProbeFn(x: number, y: number): { wx: number; wy: number; ex: number; ey: number } {
+  let el = document.elementFromPoint(x, y) as HTMLElement | null;
+  let sc: HTMLElement | null = null;
+  for (let hop = 0; el && hop < 12; hop++) {
+    const st = getComputedStyle(el);
+    if (
+      /(auto|scroll|overlay)/.test(st.overflowY + st.overflowX) &&
+      (el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1)
+    ) { sc = el; break; }
+    el = el.parentElement;
+  }
+  return {
+    wx: window.scrollX, wy: window.scrollY,
+    ex: sc ? sc.scrollLeft : -1, ey: sc ? sc.scrollTop : -1,
+  };
+}
+
+/** Serialized into the page: scroll the scrollable ancestor at (x,y). */
+function domScrollAtFn(x: number, y: number, dx: number, dy: number): { scrolled: string } {
+  let el = document.elementFromPoint(x, y) as HTMLElement | null;
+  for (let hop = 0; el && hop < 12; hop++) {
+    const st = getComputedStyle(el);
+    if (
+      /(auto|scroll|overlay)/.test(st.overflowY + st.overflowX) &&
+      (el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1)
+    ) {
+      el.scrollBy({ left: dx, top: dy, behavior: "instant" as ScrollBehavior });
+      return { scrolled: el.tagName.toLowerCase() + (el.id ? "#" + el.id : "") };
+    }
+    el = el.parentElement;
+  }
+  (document.scrollingElement ?? document.documentElement).scrollBy({
+    left: dx, top: dy, behavior: "instant" as ScrollBehavior,
+  });
+  return { scrolled: "window" };
+}
+
+// ── Per-character typing (reference-build behavior) ─────────────────────────
+// Pure Input.insertText never fires keydown/keyup, so autocomplete lists,
+// search-as-you-type filters and keyboard-driven widgets don't react. The
+// reference build types each ASCII char as REAL key events (with shift when
+// needed) and falls back to insertText only for unmapped chars (þ, ð, é…).
+
+interface CharKey { key: string; code: string; keyCode: number; shift: boolean }
+
+const CHAR_KEYS: Record<string, CharKey> = {};
+{
+  for (let i = 0; i < 26; i++) {
+    const lower = String.fromCharCode(97 + i);
+    const upper = String.fromCharCode(65 + i);
+    const code = `Key${upper}`;
+    CHAR_KEYS[lower] = { key: lower, code, keyCode: 65 + i, shift: false };
+    CHAR_KEYS[upper] = { key: upper, code, keyCode: 65 + i, shift: true };
+  }
+  const digits = ")!@#$%^&*(";
+  for (let d = 0; d <= 9; d++) {
+    const code = `Digit${d}`;
+    CHAR_KEYS[String(d)] = { key: String(d), code, keyCode: 48 + d, shift: false };
+    CHAR_KEYS[digits[d]] = { key: digits[d], code, keyCode: 48 + d, shift: true };
+  }
+  const punct: [string, string, string, number][] = [
+    [";", ":", "Semicolon", 186], ["=", "+", "Equal", 187], [",", "<", "Comma", 188],
+    ["-", "_", "Minus", 189], [".", ">", "Period", 190], ["/", "?", "Slash", 191],
+    ["`", "~", "Backquote", 192], ["[", "{", "BracketLeft", 219],
+    ["\\", "|", "Backslash", 220], ["]", "}", "BracketRight", 221], ["'", "\"", "Quote", 222],
+  ];
+  for (const [plain, shifted, code, keyCode] of punct) {
+    CHAR_KEYS[plain] = { key: plain, code, keyCode, shift: false };
+    CHAR_KEYS[shifted] = { key: shifted, code, keyCode, shift: true };
+  }
+  CHAR_KEYS[" "] = { key: " ", code: "Space", keyCode: 32, shift: false };
+}
+
+/** Type text at the cursor: real key events per char; insertText fallback. */
+async function typeAtCursor(tabId: number, text: string): Promise<void> {
+  // Queue all dispatches in order (CDP serializes per target) — awaiting each
+  // round trip would make long texts crawl.
+  const dispatches: Promise<unknown>[] = [];
+  for (const ch of text) {
+    if (ch === "\n" || ch === "\r") {
+      const mods = 0;
+      dispatches.push(cdp(tabId, "Input.dispatchKeyEvent", {
+        type: "keyDown", key: "Enter", code: "Enter",
+        windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13,
+        text: "\r", unmodifiedText: "\r", modifiers: mods,
+      }));
+      dispatches.push(cdp(tabId, "Input.dispatchKeyEvent", {
+        type: "keyUp", key: "Enter", code: "Enter",
+        windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, modifiers: mods,
+      }));
+      continue;
+    }
+    const def = CHAR_KEYS[ch];
+    if (def) {
+      const mods = def.shift ? 8 : 0;
+      dispatches.push(cdp(tabId, "Input.dispatchKeyEvent", {
+        type: "keyDown", key: def.key, code: def.code,
+        windowsVirtualKeyCode: def.keyCode, nativeVirtualKeyCode: def.keyCode,
+        text: ch, unmodifiedText: ch, modifiers: mods,
+      }));
+      dispatches.push(cdp(tabId, "Input.dispatchKeyEvent", {
+        type: "keyUp", key: def.key, code: def.code,
+        windowsVirtualKeyCode: def.keyCode, nativeVirtualKeyCode: def.keyCode, modifiers: mods,
+      }));
+    } else {
+      dispatches.push(cdp(tabId, "Input.insertText", { text: ch }));
+    }
+  }
+  await Promise.all(dispatches);
 }
 
 // ── Screenshot / zoom ─────────────────────────────────────────────────────────
@@ -867,6 +1019,7 @@ async function executeComputerAction(input: ComputerInput): Promise<unknown> {
       await mouseMove(tabId, x, y);
       await cdp(tabId, "Input.dispatchMouseEvent", {
         type: "mousePressed", x, y, button: "left", clickCount: 1, modifiers: 0,
+        buttons: 1, force: 0.5,
       });
       return { ok: true, action, at: c };
     }
@@ -877,6 +1030,7 @@ async function executeComputerAction(input: ComputerInput): Promise<unknown> {
       lastPos = { x: c[0], y: c[1] };
       await cdp(await activeTabId(), "Input.dispatchMouseEvent", {
         type: "mouseReleased", x, y, button: "left", clickCount: 1, modifiers: 0,
+        buttons: 0,
       });
       return { ok: true, action, at: c };
     }
@@ -892,7 +1046,7 @@ async function executeComputerAction(input: ComputerInput): Promise<unknown> {
         await mouseClick(tabId, rect.cx, rect.cy, "left", 1, 0);
         await new Promise((r) => setTimeout(r, 120));
       }
-      await cdp(tabId, "Input.insertText", { text: input.text });
+      await typeAtCursor(tabId, input.text);
       return { ok: true, action, length: input.text.length };
     }
 
@@ -929,11 +1083,44 @@ async function executeComputerAction(input: ComputerInput): Promise<unknown> {
       // DOM wheel semantics: positive deltaY scrolls the page down.
       const deltaY = dir === "down" ? amount * 100 : dir === "up" ? -amount * 100 : 0;
       const deltaX = dir === "right" ? amount * 100 : dir === "left" ? -amount * 100 : 0;
-      await cdp(await activeTabId(), "Input.dispatchMouseEvent", {
+      const tab = await getTaskTab();
+      if (tab.id === undefined) throw new Error("no task tab");
+      const tabId = tab.id;
+      const probe = () =>
+        chrome.scripting
+          .executeScript({ target: { tabId }, func: scrollProbeFn, args: [x, y] })
+          .then((r) => r[0]?.result as { wx: number; wy: number; ex: number; ey: number } | undefined)
+          .catch(() => undefined);
+      const domScroll = () =>
+        chrome.scripting
+          .executeScript({ target: { tabId }, func: domScrollAtFn, args: [x, y, deltaX, deltaY] })
+          .then((r) => (r[0]?.result as { scrolled: string } | undefined)?.scrolled ?? "window");
+      // Background tab: wheel rendering is unreliable — scroll the DOM directly.
+      if (!tab.active) {
+        const scrolled = await domScroll().catch(() => null);
+        if (scrolled) return { ok: true, action, direction: dir, amount, method: "dom", scrolled };
+      }
+      const before = await probe();
+      await cdp(tabId, "Input.dispatchMouseEvent", {
         type: "mouseWheel", x, y, deltaX, deltaY,
         button: "none", clickCount: 0, modifiers: modsFromText(input.text),
       });
-      return { ok: true, action, direction: dir, amount };
+      if (before) {
+        await sleep(200);
+        const after = await probe();
+        if (after) {
+          const winMoved = Math.abs(after.wx - before.wx) > 5 || Math.abs(after.wy - before.wy) > 5;
+          const elMoved =
+            before.ex >= 0 && after.ex >= 0 &&
+            (Math.abs(after.ex - before.ex) > 5 || Math.abs(after.ey - before.ey) > 5);
+          if (!winMoved && !elMoved) {
+            // Wheel swallowed — scroll the container directly.
+            const scrolled = await domScroll().catch(() => null);
+            if (scrolled) return { ok: true, action, direction: dir, amount, method: "dom-fallback", scrolled };
+          }
+        }
+      }
+      return { ok: true, action, direction: dir, amount, method: "wheel" };
     }
 
     case "wait": {
