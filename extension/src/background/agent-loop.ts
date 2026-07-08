@@ -445,7 +445,7 @@ export async function runAgentLoop(
     }
     // Over-verification guard: if Eva only observed this round (no state-
     // changing action), count it; after two in a row, tell her to wrap up.
-    const PASSIVE_COMPUTER = new Set(["screenshot", "zoom", "wait", "cursor_position", "mouse_move"]);
+    const PASSIVE_COMPUTER = new Set(["screenshot", "zoom", "wait", "cursor_position", "mouse_move", "scroll_to"]);
     const OBSERVE_TOOLS = new Set([
       "read_page", "find", "get_active_tab", "get_page_text",
       "read_console", "read_network", "tabs_list",

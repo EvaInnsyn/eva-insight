@@ -557,6 +557,17 @@ function modsFromText(text?: string): number {
   return text.split("+").reduce((acc, p) => acc | (MOD_BITS[p.trim().toLowerCase()] ?? 0), 0);
 }
 
+/** Parse a click-modifiers string ("ctrl+shift", "cmd") into CDP bits. */
+function parseModifiers(mods?: string): number {
+  if (!mods) return 0;
+  let bits = 0;
+  for (const part of mods.split("+")) {
+    const bit = MOD_BITS[part.trim().toLowerCase()];
+    if (bit != null) bits |= bit;
+  }
+  return bits;
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Held-buttons bitmask (CDP `buttons`): pages read e.buttons in drag/gesture code. */
@@ -854,8 +865,13 @@ interface ComputerInput {
   action?: string;
   coordinate?: [number, number];
   start_coordinate?: [number, number];
-  /** batch_actions extension: target a measured element instead of pixels. */
+  /** Target a measured element instead of pixels (schema name: ref). */
   element_id?: string;
+  ref?: string;
+  /** Click-action modifier string, e.g. "ctrl+shift". */
+  modifiers?: string;
+  /** key action: repeat the key sequence N times (1-100). */
+  repeat?: number;
   text?: string;
   scroll_direction?: "up" | "down" | "left" | "right";
   scroll_amount?: number;
@@ -940,24 +956,28 @@ async function executeComputerAction(input: ComputerInput): Promise<unknown> {
     case "middle_click":
     case "double_click":
     case "triple_click": {
-      // Element targeting (batch precision): measure live center, CSS px.
-      if (input.element_id) {
-        const rect = await rectInActivePage(input.element_id);
+      // Element targeting (ref from find/read_page): measure live center, CSS px.
+      const clickTarget = input.ref ?? input.element_id;
+      const clickMods = parseModifiers(input.modifiers) || modsFromText(input.text);
+      if (clickTarget) {
+        let rect;
+        try {
+          rect = await rectInActivePage(clickTarget);
+        } catch (err) {
+          if (err instanceof Error && err.name === "stale_element") {
+            throw new Error(
+              `Element with ref '${clickTarget}' not found. It may have been removed from the page. Use read_page or find to get fresh refs.`,
+            );
+          }
+          throw err;
+        }
         const tabId0 = await activeTabId();
         const button0: Button =
           action === "right_click" ? "right" : action === "middle_click" ? "middle" : "left";
         const clicks0 = action === "double_click" ? 2 : action === "triple_click" ? 3 : 1;
-        if (clicks0 > 1) {
-          await mouseMove(tabId0, rect.cx, rect.cy, modsFromText(input.text));
-          for (let i = 1; i <= clicks0; i++) {
-            const base0 = { x: rect.cx, y: rect.cy, button: button0, clickCount: i, modifiers: modsFromText(input.text) };
-            await cdp(tabId0, "Input.dispatchMouseEvent", { ...base0, type: "mousePressed" });
-            await cdp(tabId0, "Input.dispatchMouseEvent", { ...base0, type: "mouseReleased" });
-          }
-        } else {
-          await mouseClick(tabId0, rect.cx, rect.cy, button0, 1, modsFromText(input.text));
-        }
-        return { ok: true, action, element_id: input.element_id, at_css: [rect.cx, rect.cy] };
+        await mouseClick(tabId0, rect.cx, rect.cy, button0, clicks0, clickMods);
+        lastPos = { x: Math.round(rect.cx / coordScale), y: Math.round(rect.cy / coordScale) };
+        return { ok: true, action, ref: clickTarget, at_css: [rect.cx, rect.cy] };
       }
       const c = requireCoord(input);
       const { x, y } = toCss(c);
@@ -966,18 +986,9 @@ async function executeComputerAction(input: ComputerInput): Promise<unknown> {
         action === "right_click" ? "right" : action === "middle_click" ? "middle" : "left";
       const clicks = action === "double_click" ? 2 : action === "triple_click" ? 3 : 1;
       const tabId = await activeTabId();
-      if (clicks > 1) {
-        // Chrome needs escalating clickCount presses for dbl/triple detection.
-        await mouseMove(tabId, x, y, modsFromText(input.text));
-        for (let i = 1; i <= clicks; i++) {
-          const base = { x, y, button, clickCount: i, modifiers: modsFromText(input.text) };
-          await cdp(tabId, "Input.dispatchMouseEvent", { ...base, type: "mousePressed" });
-          await cdp(tabId, "Input.dispatchMouseEvent", { ...base, type: "mouseReleased" });
-        }
-      } else {
-        await mouseClick(tabId, x, y, button, 1, modsFromText(input.text));
-      }
-      return { ok: true, action, at: c };
+      // mouseClick handles dwell, press-hold, buttons bitmask and the
+      // escalating full press/release pairs multi-click detectors need.
+      await mouseClick(tabId, x, y, button, clicks, clickMods);      return { ok: true, action, at: c };
     }
 
     case "mouse_move": {
@@ -1040,9 +1051,10 @@ async function executeComputerAction(input: ComputerInput): Promise<unknown> {
         throw new Error("type requires text");
       }
       const tabId = await activeTabId();
-      // With element_id: click the field first (focus), then insert.
-      if (input.element_id) {
-        const rect = await rectInActivePage(input.element_id);
+      // With ref/element_id: click the field first (focus), then type.
+      const typeTarget = input.ref ?? input.element_id;
+      if (typeTarget) {
+        const rect = await rectInActivePage(typeTarget);
         await mouseClick(tabId, rect.cx, rect.cy, "left", 1, 0);
         await new Promise((r) => setTimeout(r, 120));
       }
@@ -1052,10 +1064,22 @@ async function executeComputerAction(input: ComputerInput): Promise<unknown> {
 
     case "key": {
       if (typeof input.text !== "string" || !input.text.trim()) {
-        throw new Error('key requires text, e.g. "Return" or "ctrl+s"');
+        throw new Error('key requires text, e.g. "Return", "ctrl+s" or "Down Down Enter"');
       }
-      await pressCombo(await activeTabId(), input.text);
-      return { ok: true, action, key: input.text };
+      const combos = input.text.trim().split(/\s+/);
+      const repeat = Math.min(Math.max(Math.round(input.repeat ?? 1), 1), 100);
+      if (combos.length * repeat > 200) {
+        throw new Error("key sequence too long (max 200 presses per call)");
+      }
+      const tabId = await activeTabId();
+      for (let r = 0; r < repeat; r++) {
+        for (const combo of combos) {
+          await pressCombo(tabId, combo);
+          // tiny gap so keyboard-navigation UIs track each press
+          if (combos.length * repeat > 1) await sleep(30);
+        }
+      }
+      return { ok: true, action, key: input.text, presses: combos.length * repeat };
     }
 
     case "hold_key": {
@@ -1123,6 +1147,31 @@ async function executeComputerAction(input: ComputerInput): Promise<unknown> {
       return { ok: true, action, direction: dir, amount, method: "wheel" };
     }
 
+    case "hover": {
+      const target = input.ref ?? input.element_id;
+      const tabId = await activeTabId();
+      if (target) {
+        const rect = await rectInActivePage(target);
+        await mouseMove(tabId, rect.cx, rect.cy, parseModifiers(input.modifiers));
+        lastPos = { x: Math.round(rect.cx / coordScale), y: Math.round(rect.cy / coordScale) };
+      } else {
+        const c = requireCoord(input);
+        const { x, y } = toCss(c);
+        lastPos = { x: c[0], y: c[1] };
+        await mouseMove(tabId, x, y, parseModifiers(input.modifiers));
+      }
+      // dwell so hover-driven UI (tooltips, submenus) has time to open
+      await sleep(400);
+      return { ok: true, action };
+    }
+
+    case "scroll_to": {
+      const target = input.ref ?? input.element_id;
+      if (!target) throw new Error("scroll_to requires ref (from read_page or find)");
+      const pos = await scrollActivePageTo(target);
+      return { ok: true, action, ref: target, scrolled_to: pos };
+    }
+
     case "wait": {
       const seconds = Math.min(Math.max(input.duration ?? 1, 0.1), 10);
       await new Promise((r) => setTimeout(r, seconds * 1000));
@@ -1146,7 +1195,7 @@ const HANDLERS: Record<string, ToolHandler> = {
     // step returns a fresh screenshot of the result, so act+see is ONE
     // round instead of two. Pure reads keep their JSON result.
     const a = input?.action ?? "";
-    const NO_SHOT = new Set(["screenshot", "zoom", "wait", "cursor_position"]);
+    const NO_SHOT = new Set(["screenshot", "zoom", "wait", "cursor_position", "scroll_to"]);
     if (a && !NO_SHOT.has(a)) {
       await waitForTabLoad().catch(() => {});
       await waitForSettleInActivePage(800).catch(
@@ -1262,11 +1311,42 @@ const HANDLERS: Record<string, ToolHandler> = {
     return { result: r.value };
   },
 
-  async read_page({ filter, max_chars, ref_id }: { filter?: string; max_chars?: number; ref_id?: string } = {}) {
+  async read_page({ filter, max_chars, ref_id, depth }: { filter?: string; max_chars?: number; ref_id?: string; depth?: number } = {}) {
     const snapshot = await readActivePage();
-    const cap = Math.min(Math.max(max_chars ?? 40_000, 4_000), 100_000);
+    const cap = Math.min(Math.max(max_chars ?? 50_000, 4_000), 200_000);
+    const maxDepth = Math.min(Math.max(depth ?? 15, 1), 40);
 
-    // Focus on one subtree (e.g. just the menu that opened).
+    // Reference-format serialization: indented text lines, one element each —
+    // `role "name" [ref] value="…"` — the shape the model reads natively, at
+    // a fraction of the tokens of a JSON tree.
+    const INTERACTIVE = new Set([
+      "link", "button", "textbox", "combobox", "checkbox", "radio", "menuitem",
+      "menuitemcheckbox", "menuitemradio", "tab", "option", "searchbox",
+      "slider", "switch", "listbox", "submit", "select",
+    ]);
+    const esc = (v: unknown, max = 100) =>
+      String(v ?? "").replace(/\s+/g, " ").trim().slice(0, max).replace(/"/g, '\\"');
+    const lines: string[] = [];
+    const emit = (n: any, d: number) => {
+      if (!n || lines.length >= 10_000 || d > maxDepth) return;
+      const interactiveOnly = filter === "interactive";
+      const shows = interactiveOnly
+        ? n.visible && (INTERACTIVE.has(n.role) || n.value !== undefined)
+        : true;
+      if (shows) {
+        let line = " ".repeat(interactiveOnly ? 0 : d) + (n.role || "generic");
+        const nm = esc(n.name);
+        if (nm) line += ` "${nm}"`;
+        line += ` [${n.id}]`;
+        if (n.value !== undefined && n.value !== "") line += ` value="${esc(n.value)}"`;
+        lines.push(line);
+        const txt = esc(n.text, 200);
+        if (txt && !interactiveOnly) lines.push(" ".repeat(d + 1) + `text "${txt}"`);
+      }
+      for (const ch of n.children ?? []) emit(ch, shows && filter !== "interactive" ? d + 1 : d);
+    };
+
+    let root: any = snapshot.root;
     if (ref_id) {
       let found: any = null;
       const locate = (n: any) => {
@@ -1275,42 +1355,28 @@ const HANDLERS: Record<string, ToolHandler> = {
         (n.children ?? []).forEach(locate);
       };
       locate(snapshot.root);
-      if (!found) throw new Error(`element ${ref_id} not found in the current page tree`);
-      const json = JSON.stringify(found);
-      return json.length <= cap
-        ? { url: snapshot.url, subtree: found }
-        : { url: snapshot.url, _truncated: true, data: json.slice(0, cap) };
-    }
-
-    if (filter === "interactive") {
-      // Flat, token-lean list of things Eva can act on.
-      const INTERACTIVE = new Set([
-        "link", "button", "textbox", "combobox", "checkbox", "radio", "menuitem",
-        "menuitemcheckbox", "menuitemradio", "tab", "option", "searchbox",
-        "slider", "switch", "listbox", "submit", "select",
-      ]);
-      const out: unknown[] = [];
-      const walk = (n: any) => {
-        if (!n) return;
-        if (n.visible && (INTERACTIVE.has(n.role) || n.value !== undefined)) {
-          out.push({ id: n.id, role: n.role, name: n.name, value: n.value, bbox: n.bbox });
-        }
-        (n.children ?? []).forEach(walk);
-      };
-      walk(snapshot.root);
-      // Trim whole items until the payload fits the cap.
-      while (out.length > 0 && JSON.stringify(out).length > cap) {
-        out.splice(Math.floor(out.length * 0.8));
+      if (!found) {
+        throw new Error(
+          `Element with ref '${ref_id}' not found. It may have been removed from the page. Use read_page without ref_id to get the current page state.`,
+        );
       }
-      return { url: snapshot.url, title: snapshot.title, interactive: out };
+      root = found;
     }
+    emit(root, 0);
 
-    const json = JSON.stringify(snapshot);
-    if (json.length <= cap) return snapshot;
+    let pageContent = lines.join("\n");
+    let note: string | undefined;
+    if (pageContent.length > cap) {
+      const cut = pageContent.lastIndexOf("\n", cap);
+      const full = pageContent.length;
+      pageContent = pageContent.slice(0, cut > 0 ? cut : cap);
+      note = `truncated at a line boundary — full size ${full} chars. Pass a larger max_chars, or use depth/ref_id/filter:'interactive' to focus.`;
+    }
     return {
-      _truncated: true,
-      _note: "Page snapshot was too large and has been truncated. Use filter: 'interactive' or the find tool for a leaner view.",
-      data: json.slice(0, cap),
+      url: snapshot.url,
+      title: snapshot.title,
+      ...(note ? { note } : {}),
+      page_content: pageContent,
     };
   },
 
@@ -1417,20 +1483,32 @@ const HANDLERS: Record<string, ToolHandler> = {
   },
 
   /** Recent console output (log/warn/error) captured while Eva works. */
-  async read_console({ limit }: { limit?: number }) {
+  async read_console({ limit, pattern, onlyErrors, clear }: { limit?: number; pattern?: string; onlyErrors?: boolean; clear?: boolean } = {}) {
     const tab = await getTaskTab();
     if (tab.id === undefined) throw new Error("no task tab");
-    const entries = (consoleBuf.get(tab.id) ?? []).slice(-(limit ?? 40));
+    let entries = consoleBuf.get(tab.id) ?? [];
+    if (onlyErrors) entries = entries.filter((e) => e.level === "error");
+    if (pattern) {
+      try {
+        const re = new RegExp(pattern, "i");
+        entries = entries.filter((e) => re.test(e.text));
+      } catch {
+        throw new Error(`invalid regex pattern: ${pattern}`);
+      }
+    }
+    entries = entries.slice(-(limit ?? 40));
+    if (clear) consoleBuf.set(tab.id, []);
     return entries.length
       ? { entries }
-      : { entries: [], note: "No console output captured yet — it records while Eva is acting on the page. Interact first, then read again." };
+      : { entries: [], note: "No matching console output captured yet — it records while Eva is acting on the page. Interact first, then read again." };
   },
 
   /** Recent network requests captured while Eva works. */
-  async read_network({ filter, limit }: { filter?: string; limit?: number }) {
+  async read_network({ filter, limit, clear }: { filter?: string; limit?: number; clear?: boolean } = {}) {
     const tab = await getTaskTab();
     if (tab.id === undefined) throw new Error("no task tab");
     let entries = networkBuf.get(tab.id) ?? [];
+    if (clear) networkBuf.set(tab.id, []);
     if (filter) {
       const f = filter.toLowerCase();
       entries = entries.filter(
@@ -1533,10 +1611,13 @@ const HANDLERS: Record<string, ToolHandler> = {
       const t = await chrome.tabs.get(tabId);
       return { url: t.url ?? "", title: t.title ?? "", history: url };
     }
-    if (!/^https?:\/\//i.test(url)) {
-      throw new Error('url must start with http:// or https:// (or be "back"/"forward")');
+    let target = url;
+    if (!/^https?:\/\//i.test(target)) {
+      // Reference behavior: protocol may be omitted — default to https.
+      if (/^[\w-]+(\.[\w-]+)+/.test(target)) target = `https://${target}`;
+      else throw new Error('url must be a web address (or "back"/"forward")');
     }
-    return await navigateAndWait(tabId, url);
+    return await navigateAndWait(tabId, target);
   },
 
   async form_input({
@@ -1544,11 +1625,13 @@ const HANDLERS: Record<string, ToolHandler> = {
     value,
   }: {
     element_id: string;
-    value: string;
+    value: string | number | boolean;
   }) {
     requireString(element_id, "element_id");
-    requireString(value, "value");
-    return await formInputInActivePage(element_id, value);
+    if (value === undefined || value === null) throw new Error("value is required");
+    // Booleans (checkboxes) and numbers arrive per the reference schema.
+    const v = typeof value === "boolean" ? (value ? "true" : "false") : String(value);
+    return await formInputInActivePage(element_id, v);
   },
 
   async tabs_list() {

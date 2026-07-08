@@ -39,7 +39,7 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
   {
     name: "batch_actions",
     description:
-      "Execute several steps in ONE call — much faster and cheaper than one step per turn. Two step shapes, freely mixed in order: (1) computer actions, incl. element targeting: {action:'left_click', element_id:'e85'} clicks the element's live center; {action:'type', element_id:'e12', text:'...'}; {action:'mouse_move', element_id:'e7'} hovers (opens submenus); coordinates still work: {action:'left_click', coordinate:[x,y]}; plus {action:'key', text:'Return'}, {action:'wait', duration:1}. (2) DOM tools: {tool:'find', input:{query:'save button'}}, {tool:'read_page', input:{filter:'interactive'}}, {tool:'get_page_text'}, {tool:'click'/'type'/'hover'/'form_input'/'scroll_to', input:{element_id:...}}, {tool:'read_console'}. Tool steps' outputs come back in step_results — so hover → read_page → (next turn) click, or type → key Enter → get_page_text, land in ONE round. Power moves: find once then batch everything by element ids; put a read step LAST to see what changed. Runs in order, stops on first error, ALWAYS returns a fresh screenshot. navigate/tabs/javascript_eval can't batch (they need confirmation). Max 20 steps.",
+      "Execute several steps in ONE call — much faster and cheaper than one step per turn. Two step shapes, freely mixed in order: (1) computer actions, incl. element targeting: {action:'left_click', element_id:'e85'} clicks the element's live center; {action:'type', element_id:'e12', text:'...'}; {action:'mouse_move', element_id:'e7'} hovers (opens submenus); coordinates still work: {action:'left_click', coordinate:[x,y]}; plus {action:'key', text:'Return'}, {action:'wait', duration:1}. (2) DOM tools: {tool:'find', input:{query:'save button'}}, {tool:'read_page', input:{filter:'interactive'}}, {tool:'get_page_text'}, {tool:'click'/'type'/'hover'/'form_input'/'scroll_to', input:{element_id:...}}, {tool:'read_console'}. Tool steps' outputs come back in step_results — so hover → read_page → (next turn) click, or type → key Enter → get_page_text, land in ONE round. Power moves: find once then batch everything by element ids; put a read step LAST to see what changed. Use this tool extensively — whenever you can predict two or more steps ahead, batch them. Coordinates you write in THIS batch refer to the screenshot taken BEFORE this call. Runs in order, stops on first error, ALWAYS returns a fresh screenshot. Cannot be nested; navigate/tabs/javascript_eval can't batch (they need confirmation). Max 20 steps.",
     input_schema: {
       type: "object",
       properties: {
@@ -56,7 +56,7 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
   {
     name: "find",
     description:
-      "Find elements by natural language — 'font selector', 'save button', 'menu item Lexend', 'email field'. Returns up to 10 ranked matches with element ids (use with click/hover/type) plus their measured on-screen centers and sizes. START HERE for any interaction with a control: it is faster, cheaper and more precise than reading the whole page or estimating pixels from a screenshot. Only visible elements match.",
+      "Find elements on the page using natural language. Can search for elements by their purpose (e.g., 'search bar', 'login button') or by text content (e.g., 'organic mango product'). Returns up to 10 matching elements with references (usable as ref in computer clicks and with click/hover/type) plus measured on-screen centers. START HERE for any interaction with a control: faster, cheaper and more precise than reading the whole page or estimating pixels from a screenshot. Only visible elements match.",
     input_schema: {
       type: "object",
       properties: {
@@ -75,7 +75,7 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
   {
     name: "read_page",
     description:
-      "Read the active tab as a structured tree (headings, links, buttons, fields, text). Each interactive element gets a short id (e.g. `e42`) usable with click/hover/type. Pass filter: 'interactive' for a flat, token-lean list of just the actionable controls (with positions) — usually all you need. Ids reset when the page navigates. Canvas editors' document areas won't appear — their toolbars/menus will.",
+      "Get an accessibility tree representation of the page: indented text lines, one element per line — role \"name\" [ref] value=\"…\". Output is limited to 50000 characters by default; if it exceeds the limit it is truncated at a line boundary with a note giving the full size — pass a larger max_chars, or use depth/ref_id/filter to focus on part of the page. Pass filter: 'interactive' for a flat list of just the actionable controls (usually all you need). Refs work as ref in computer clicks and with click/hover/type. Refs reset when the page navigates. Canvas editors' document areas won't appear — their toolbars/menus will.",
     input_schema: {
       type: "object",
       properties: {
@@ -84,8 +84,12 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
           enum: ["interactive"],
           description: "'interactive' returns only actionable elements as a flat list — cheaper and easier than the full tree.",
         },
-        max_chars: { type: "number", description: "Response size cap (4000–100000, default 40000)." },
-        ref_id: { type: "string", description: "Return only this element's subtree — e.g. read just the menu that opened." },
+        depth: {
+          type: "number",
+          description: "Maximum depth of the tree to traverse (default: 15). Use a smaller depth if output is too large.",
+        },
+        max_chars: { type: "number", description: "Maximum characters for output (default: 50000)." },
+        ref_id: { type: "string", description: "Ref of a parent element — returns that element and all its children. Use to focus on part of the page (e.g. the menu that just opened)." },
       },
       required: [],
     },
@@ -93,7 +97,7 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
   {
     name: "get_page_text",
     description:
-      "The page's full readable text (like select-all copy) — for reading, summarizing, extracting from articles, docs and long pages. Much better than read_page when you need CONTENT rather than controls.",
+      "Extract raw text content from the page, prioritizing article content. Ideal for reading articles, blog posts, or other text-heavy pages. Returns plain text without HTML formatting (clipped at 60K chars). Much better than read_page when you need CONTENT rather than controls.",
     input_schema: { type: "object", properties: {}, required: [] },
   },
   {
@@ -113,10 +117,24 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
   {
     name: "read_console",
     description:
-      "Recent console output (logs, warnings, errors) from the page, recorded while Eva acts. Use when a page misbehaves or after an action silently fails — errors often say why.",
+      "Read browser console messages (log, warn, error) recorded while Eva acts on the page. Useful for debugging JavaScript errors or understanding what the page did after your actions. IMPORTANT: provide a pattern when looking for something specific — without one you may get many irrelevant messages.",
     input_schema: {
       type: "object",
-      properties: { limit: { type: "number", description: "Max entries (default 40)." } },
+      properties: {
+        pattern: {
+          type: "string",
+          description: "Regex to filter messages (e.g., 'error|warning', 'MyApp'). Only matching messages return.",
+        },
+        onlyErrors: {
+          type: "boolean",
+          description: "If true, only return error and exception messages.",
+        },
+        clear: {
+          type: "boolean",
+          description: "If true, clear captured messages after reading to avoid duplicates next time.",
+        },
+        limit: { type: "number", description: "Max entries (default 40)." },
+      },
       required: [],
     },
   },
@@ -127,6 +145,10 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
     input_schema: {
       type: "object",
       properties: {
+        clear: {
+          type: "boolean",
+          description: "If true, clear captured requests after reading to avoid duplicates next time.",
+        },
         filter: { type: "string", description: "Substring of URL, or status prefix like '4' / '500'." },
         limit: { type: "number", description: "Max entries (default 40)." },
       },
@@ -168,14 +190,13 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
   {
     name: "form_input",
     description:
-      "Set a select dropdown, checkbox, or radio by element id. For text fields use `type`.",
+      "Set values in form elements using an element ref from find/read_page: select dropdowns, checkboxes, radios. For text fields use `type`.",
     input_schema: {
       type: "object",
       properties: {
-        element_id: { type: "string" },
+        element_id: { type: "string", description: "Element ref from find/read_page." },
         value: {
-          type: "string",
-          description: "Select: option value or visible text. Checkbox/radio: 'check' | 'uncheck' | 'toggle'.",
+          description: "For checkboxes use true/false (or 'toggle'), for selects use option value or visible text.",
         },
       },
       required: ["element_id", "value"],
@@ -205,7 +226,7 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
   {
     name: "navigate",
     description:
-      "Navigate YOUR task tab to a URL, or pass \"back\" / \"forward\" to move through history. Waits for the page to load.",
+      "Navigate YOUR task tab to a URL, or pass \"back\" / \"forward\" to move through history. The URL can be provided with or without protocol (defaults to https://). Waits for the page to load.",
     input_schema: {
       type: "object",
       properties: {
@@ -295,13 +316,79 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
  * screenshots are actually sent at (the agent loop computes this from the
  * live viewport via computeShotDims) so the model's coordinates line up.
  */
-export function buildEvaTools(display: { width: number; height: number }): ToolSchema[] {
-  const computer: AnthropicToolSchema = {
-    type: "computer_20251124",
+export function buildEvaTools(_display: { width: number; height: number }): ToolSchema[] {
+  // Custom schema mirroring the reference Chrome build (NOT computer_20251124):
+  // same action set, ref-targeting, key sequences with repeat, click modifiers.
+  const computer: CustomToolSchema = {
     name: "computer",
-    display_width_px: display.width,
-    display_height_px: display.height,
-    enable_zoom: true,
+    description:
+      "Use a mouse and keyboard to interact with a web browser, and take screenshots.\n* Whenever you intend to click on an element like an icon, you should consult a screenshot to determine the coordinates of the element before moving the cursor.\n* If you tried clicking on a program or link but it failed to load, even after waiting, try adjusting your click location so that the tip of the cursor visually falls on the element that you want to click.\n* Make sure to click any buttons, links, icons, etc with the cursor tip in the center of the element. Don't click boxes on their edges unless asked.\n* On ordinary web pages, prefer ref-targeting: pass ref from find/read_page instead of coordinates — it clicks the element's live center, no pixel guessing.",
+    input_schema: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: [
+            "left_click", "right_click", "type", "screenshot", "wait", "scroll",
+            "key", "left_click_drag", "double_click", "triple_click", "zoom",
+            "scroll_to", "hover",
+          ],
+          description:
+            "The action to perform:\n* `left_click`: Click the left mouse button at the specified coordinates.\n* `right_click`: Click the right mouse button at the specified coordinates to open context menus.\n* `double_click`: Double-click the left mouse button at the specified coordinates.\n* `triple_click`: Triple-click the left mouse button at the specified coordinates.\n* `type`: Type a string of text.\n* `screenshot`: Take a screenshot of the screen.\n* `wait`: Wait for a specified number of seconds.\n* `scroll`: Scroll up, down, left, or right at the specified coordinates.\n* `key`: Press a specific keyboard key or shortcut.\n* `left_click_drag`: Drag from start_coordinate to coordinate.\n* `zoom`: Take a screenshot of a specific region for closer inspection.\n* `scroll_to`: Scroll an element into view using its element reference ID from read_page or find tools.\n* `hover`: Move the mouse cursor to the specified coordinates or element without clicking. Useful for revealing tooltips, dropdown menus, or triggering hover states.",
+        },
+        coordinate: {
+          type: "array",
+          items: { type: "number" },
+          description:
+            "(x, y): The x (pixels from the left edge) and y (pixels from the top edge) coordinates. Required for `left_click`, `right_click`, `double_click`, `triple_click`, and `scroll` (unless ref is given). For `left_click_drag`, this is the end position.",
+        },
+        start_coordinate: {
+          type: "array",
+          items: { type: "number" },
+          description: "(x, y): The starting coordinates for `left_click_drag`.",
+        },
+        ref: {
+          type: "string",
+          description:
+            'Element reference ID from read_page or find tools (e.g., "e12"). Required for `scroll_to`. Can be used as alternative to `coordinate` for click and hover actions — clicks the element\'s measured center.',
+        },
+        text: {
+          type: "string",
+          description:
+            'The text to type (for `type` action) or the key(s) to press (for `key` action). For `key`: provide space-separated keys to press in sequence (e.g., "Backspace Backspace Delete") and shortcuts with "+" (use "cmd" on Mac, "ctrl" on Windows/Linux, e.g., "cmd+a").',
+        },
+        modifiers: {
+          type: "string",
+          description:
+            'Modifier keys for click actions. Supports: "ctrl", "shift", "alt", "cmd" (or "meta"). Can be combined with "+" (e.g., "ctrl+shift"). Optional.',
+        },
+        repeat: {
+          type: "number",
+          description:
+            "Number of times to repeat the key sequence. Only applicable for `key` action. Must be a positive integer between 1 and 100. Default is 1. Useful for navigation tasks like pressing arrow keys multiple times.",
+        },
+        duration: {
+          type: "number",
+          description: "The number of seconds to wait. Required for `wait`. Maximum 10 seconds.",
+        },
+        scroll_direction: {
+          type: "string",
+          enum: ["up", "down", "left", "right"],
+          description: "The direction to scroll. Required for `scroll`.",
+        },
+        scroll_amount: {
+          type: "number",
+          description: "The number of scroll wheel ticks. Optional for `scroll`, defaults to 3.",
+        },
+        region: {
+          type: "array",
+          items: { type: "number" },
+          description:
+            "(x0, y0, x1, y1): The rectangular region to capture for `zoom`. Coordinates define a rectangle from top-left (x0, y0) to bottom-right (x1, y1) in pixels from the viewport origin. Required for `zoom`.",
+        },
+      },
+      required: ["action"],
+    },
   };
   return [computer, ...CUSTOM_TOOLS];
 }
@@ -363,7 +450,8 @@ export const EVA_SYSTEM_PROMPT = `You are Eva — a digital employee who lives i
 You control ONE browser tab — YOUR task tab, locked in when the task starts. It stays yours even if the user switches to another tab or window while you work: your screenshots, clicks and typing keep landing on YOUR tab (captured in the background if needed), never on what the user is currently viewing. So never panic if a screenshot shows the "wrong" page is focused elsewhere — you are still on your tab. Move deliberately with tabs_switch/tabs_create (they re-bind you). The computer tool sees that tab's viewport only (not the desktop, no other apps, no browser UI). Coordinates come from your latest screenshot. Canvas editors (Docs, Word Online) render best when your tab is visible — if canvas screenshots look frozen, tabs_switch to your own tab id to bring it forward.
 
 ## How to work — speed matters
-- find also searches EMBEDDED FRAMES (Wix canvas, Word Online editor): frame_matches come back with click_coordinate — click those with the computer tool at that coordinate (ids don't cross frames).\n- **find first.** When you need a specific control ("the font selector", "the save button"), call find — it returns exact elements with ids you can click/hover/type in one step. Only fall back to read_page (whole tree) or screenshots when find comes up empty.
+- find also searches EMBEDDED FRAMES (Wix canvas, Word Online editor): frame_matches come back with click_coordinate — click those with the computer tool at that coordinate (ids don't cross frames).\n- **find first.** When you need a specific control ("the font selector", "the save button"), call find — it returns exact elements with refs you can act on in one step: pass ref straight to the computer tool ({action:'left_click', ref:'e85'}) or to click/hover/type. Prefer ref-clicks over coordinates on ordinary pages. Only fall back to read_page (whole tree) or screenshots when find comes up empty.
+- read_page returns indented text lines: role "name" [ref] — the ref in brackets is what you click with. Keyboard navigation: {action:'key', text:'Down Down Enter'} presses a sequence; add repeat: N to repeat it (arrow through lists fast).
 - **batch_actions is your default for acting.** One call = several steps (click field → type → press Enter; or menu click → wait → next click). Steps can also be DOM tools: {tool:'find'...}, {tool:'read_page'...}, {tool:'get_page_text'} — their outputs return in step_results, so act → read lands in one round (e.g. click a menu, then {tool:'read_page', input:{filter:'interactive'}} to see its items; or submit a search, then {tool:'get_page_text'}). It always returns a fresh screenshot. Single computer actions ALSO return a fresh screenshot of the result automatically — never spend a turn just asking for a screenshot after acting.
 - **Ordinary websites: use the DOM fast path.** find/read_page give you element ids; click/type by id is faster and more precise than pixels. Use the computer tool when the page is a canvas editor, heavy custom widgets, or the DOM tools come back thin.
 - **Toolbars, menus, dropdowns — even in canvas editors — are DOM.** The document area of Google Docs/Word Online is a canvas, but their toolbars and menus appear in read_page. When a coordinate click on a control seems to do nothing, don't keep re-clicking pixels: read_page, find the control by name, and use the click tool (it presses a real mouse at the element's measured center). Example: changing a font — select the text with the keyboard, read_page, click the font combobox by id, type the font name, press Return.

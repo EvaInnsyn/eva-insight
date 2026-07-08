@@ -73,6 +73,8 @@ const COMPUTER_ACTION_LABELS: Record<string, string> = {
   scroll: "Scrolling",
   wait: "Waiting",
   cursor_position: "Checking cursor",
+  hover: "Hovering",
+  scroll_to: "Scrolling to element",
 };
 
 function labelFor(name: string, input?: unknown): string {
