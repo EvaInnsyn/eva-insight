@@ -12,7 +12,7 @@
 
 import { Hono } from "hono";
 import { loadEnv } from "../env.js";
-import { findOrCreateUserBySupabaseId, setUserPlan } from "../db.js";
+import { findOrCreateUserBySupabaseId, grantCredit, setUserPlan } from "../db.js";
 import { PLANS, type PlanId } from "../plans.js";
 
 export const planRoute = new Hono();
@@ -65,16 +65,18 @@ planRoute.post("/", async (c) => {
     supabase_user_id,
     typeof email === "string" && email ? email : supabase_user_id,
   );
-  const updated = setUserPlan(user.id, plan as PlanId)!;
+  // Credit era: a confirmed payment ADDS the package's credit. The plan
+  // label is kept for display; caps become irrelevant once credit is set.
+  setUserPlan(user.id, plan as PlanId);
+  const balance = grantCredit(user.id, PLANS[plan as PlanId].priceIsk, `kaup:${plan}`);
 
   return c.json({
     ok: true,
     user: {
-      id: updated.id,
-      name: updated.name,
-      plan: updated.plan,
-      monthly_cap_input_tokens: updated.monthly_cap_input_tokens,
-      monthly_cap_output_tokens: updated.monthly_cap_output_tokens,
+      id: user.id,
+      name: user.name,
+      plan,
+      credit_balance_isk: Math.round(balance),
     },
   });
 });

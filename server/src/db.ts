@@ -15,6 +15,8 @@ import { dirname, resolve } from "node:path";
 import { PLANS, DEFAULT_PLAN, type PlanId } from "./plans.js";
 
 export interface User {
+  /** Prepaid ISK balance; null = legacy monthly-cap user. */
+  credit_balance_isk: number | null;
   id: string;
   name: string;
   token: string;
@@ -86,6 +88,25 @@ export function initDb(filepath = "data/eva.db"): Database.Database {
 
   // Keep 90 days — plenty for weekly/monthly stats, keeps the file small.
   db.prepare("DELETE FROM usage_events WHERE ts < datetime('now', '-90 days')").run();
+
+  // Prepaid credit (ISK). NULL = legacy monthly-cap mode; a value (even 0)
+  // switches the user to credit mode: balance burns down per request and
+  // never resets. Every change is journaled in credit_events.
+  const uCols = db.prepare("PRAGMA table_info(users)").all() as { name: string }[];
+  if (!uCols.some((c) => c.name === "credit_balance_isk")) {
+    db.exec(`ALTER TABLE users ADD COLUMN credit_balance_isk REAL;`);
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS credit_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      ts TEXT NOT NULL,
+      delta_isk REAL NOT NULL,
+      balance_after REAL NOT NULL,
+      reason TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS credit_events_user_ts ON credit_events(user_id, ts);
+  `);
 
   // Eva's lasting memory per user — one compact note (business facts,
   // preferences, recurring sites) the extension injects into every run.
@@ -381,6 +402,43 @@ export function getUserActivity(userId: string): UserActivity {
 }
 
 /** Returns true when the user has hit either cap. */
+/** Add (or with negative delta, remove) prepaid credit. Returns new balance. */
+export function grantCredit(userId: string, deltaIsk: number, reason: string): number {
+  const db = getDb();
+  const tx = db.transaction(() => {
+    db.prepare(
+      "UPDATE users SET credit_balance_isk = COALESCE(credit_balance_isk, 0) + ? WHERE id = ?",
+    ).run(deltaIsk, userId);
+    const row = db.prepare("SELECT credit_balance_isk AS b FROM users WHERE id = ?").get(userId) as { b: number } | undefined;
+    const after = row?.b ?? 0;
+    db.prepare(
+      "INSERT INTO credit_events (user_id, ts, delta_isk, balance_after, reason) VALUES (?, datetime('now'), ?, ?, ?)",
+    ).run(userId, deltaIsk, after, reason);
+    return after;
+  });
+  return tx() as number;
+}
+
+/** Burn credit for usage (delta stored negative). Balance may dip below 0 on the final request. */
+export function chargeCredit(userId: string, isk: number, reason: string): number {
+  return grantCredit(userId, -Math.abs(isk), reason);
+}
+
+export interface CreditEvent {
+  ts: string;
+  delta_isk: number;
+  balance_after: number;
+  reason: string;
+}
+
+export function listCreditEvents(userId: string, limit = 10): CreditEvent[] {
+  return getDb()
+    .prepare(
+      "SELECT ts, delta_isk, balance_after, reason FROM credit_events WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+    )
+    .all(userId, limit) as CreditEvent[];
+}
+
 export const MEMORY_MAX_CHARS = 6000;
 
 export function getMemory(userId: string): { content: string; updated_at: string | null } {

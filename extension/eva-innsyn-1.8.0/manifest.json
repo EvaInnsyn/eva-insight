@@ -1,0 +1,82 @@
+{
+  "manifest_version": 3,
+  "name": "Eva Innsýn",
+  "description": "Your digital employee. Switches from accountant to marketer to HR manager to programmer — instantly.",
+  "version": "1.8.0",
+  "action": {
+    "default_title": "Open Eva Innsýn"
+  },
+  "background": {
+    "service_worker": "service-worker-loader.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  },
+  "content_scripts": [
+    {
+      "js": [
+        "assets/index.ts-BEp6C4Gy.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "js": [
+        "assets/platform-session-relay.ts-hFnrL3_x.js"
+      ],
+      "matches": [
+        "https://app.evai.is/*",
+        "https://eva-innsyn.vercel.app/*"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "permissions": [
+    "sidePanel",
+    "tabs",
+    "activeTab",
+    "scripting",
+    "storage",
+    "alarms",
+    "webNavigation",
+    "debugger"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_security_policy": {
+    "extension_pages": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src https:; img-src https: data: 'self';"
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "minimum_chrome_version": "116",
+  "web_accessible_resources": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "resources": [
+        "assets/index.ts-BEp6C4Gy.js"
+      ],
+      "use_dynamic_url": false
+    },
+    {
+      "matches": [
+        "https://app.evai.is/*",
+        "https://eva-innsyn.vercel.app/*"
+      ],
+      "resources": [
+        "assets/platform-session-relay.ts-hFnrL3_x.js"
+      ],
+      "use_dynamic_url": false
+    }
+  ]
+}

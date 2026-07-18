@@ -16,7 +16,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { loadEnv } from "../env.js";
 import { getClient, withSystemCache, withToolsCache } from "../anthropic.js";
 import { authenticate, authErrorResponse } from "../auth.js";
-import { recordUsage } from "../db.js";
+import { chargeCredit, recordUsage } from "../db.js";
+import { costIsk } from "../pricing.js";
 
 const ChatRequestSchema = z.object({
   /** Override the server default; otherwise pinned to Opus 4.6. */
@@ -150,6 +151,9 @@ chatRoute.post("/", async (c) => {
         if (user && (inputTokens > 0 || outputTokens > 0)) {
           try {
             recordUsage(user.id, inputTokens, outputTokens, usageSource, model);
+            if (user.credit_balance_isk !== null) {
+              chargeCredit(user.id, costIsk(model, inputTokens, outputTokens), "notkun");
+            }
           } catch (e) {
             console.error("[eva-insight] failed to record usage", e);
           }

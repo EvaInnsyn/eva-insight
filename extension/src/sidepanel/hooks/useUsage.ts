@@ -9,6 +9,12 @@ import { useSettings } from "./useSettings";
 
 export type UsageInfo =
   | {
+      mode: "credit";
+      plan?: string;
+      name: string;
+      balance_isk: number;
+    }
+  | {
       mode: "metered";
       plan?: string;
       name: string;

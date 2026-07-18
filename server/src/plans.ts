@@ -1,12 +1,14 @@
 /**
- * Eva subscription plan definitions.
+ * Eva credit packages (2026-07-08: subscription → prepaid credit).
  *
- * Token caps are sized so hitting EITHER cap alone costs <= the plan's API budget.
- * Sonnet 4.6 rates: $3/M input, $15/M output (output includes thinking tokens).
+ * priceIsk is BOTH what the package costs AND the credit it grants — you buy
+ * Eva's work upfront and the balance burns down per request (costIsk in
+ * pricing.ts) without ever resetting. Legacy monthly token caps remain only
+ * for users not yet switched to credit mode.
  *
- *   INNSÝN  — $20/user API budget  →  1.2M output ($18)  /  5M input ($15)
- *   YFIRSÝN — $100/user API budget →  6M output ($90)    / 25M input ($75)
- *   UMSJÁ   — $150/user API budget →  9M output ($135)   / 40M input ($120)
+ *   INNSÝN  —  5.000 kr — til að prófa hversu öflug Eva er
+ *   YFIRSÝN — 15.000 kr — fullt af verkefnum
+ *   UMSJÁ   — 35.000 kr — enn meira
  */
 
 export type PlanId = "innsyn" | "yfirsyn" | "umsja";
@@ -24,7 +26,7 @@ export const PLANS: Record<PlanId, Plan> = {
   innsyn: {
     id: "innsyn",
     displayName: "INNSÝN",
-    priceIsk: 8_800,
+    priceIsk: 5_000,
     apiCapUsd: 20,
     monthlyCapInputTokens: 5_000_000,
     monthlyCapOutputTokens: 1_200_000,
@@ -32,7 +34,7 @@ export const PLANS: Record<PlanId, Plan> = {
   yfirsyn: {
     id: "yfirsyn",
     displayName: "YFIRSÝN",
-    priceIsk: 26_000,
+    priceIsk: 15_000,
     apiCapUsd: 100,
     monthlyCapInputTokens: 25_000_000,
     monthlyCapOutputTokens: 6_000_000,
@@ -40,7 +42,7 @@ export const PLANS: Record<PlanId, Plan> = {
   umsja: {
     id: "umsja",
     displayName: "UMSJÁ",
-    priceIsk: 58_000,
+    priceIsk: 35_000,
     apiCapUsd: 150,
     monthlyCapInputTokens: 40_000_000,
     monthlyCapOutputTokens: 9_000_000,

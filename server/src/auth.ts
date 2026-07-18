@@ -88,7 +88,17 @@ export async function authenticate(
         };
       }
       const current = rolloverIfNeeded(user);
-      if (overCap(current)) {
+      if (current.credit_balance_isk !== null) {
+        if (current.credit_balance_isk <= 0) {
+          return {
+            error: {
+              type: "credit_depleted",
+              message: "inneignin þín er uppurin — bættu við inneign á app.evai.is til að halda áfram",
+              status: 402,
+            },
+          };
+        }
+      } else if (overCap(current)) {
         return {
           error: {
             type: "monthly_cap_reached",
@@ -124,7 +134,17 @@ export async function authenticate(
       };
     }
     const current = rolloverIfNeeded(user);
-    if (overCap(current)) {
+    if (current.credit_balance_isk !== null) {
+      if (current.credit_balance_isk <= 0) {
+        return {
+          error: {
+            type: "credit_depleted",
+            message: "inneignin þín er uppurin — bættu við inneign á app.evai.is til að halda áfram",
+            status: 402,
+          },
+        };
+      }
+    } else if (overCap(current)) {
       return {
         error: {
           type: "monthly_cap_reached",

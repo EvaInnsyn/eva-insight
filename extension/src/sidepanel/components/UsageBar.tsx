@@ -24,6 +24,28 @@ export function UsageBar({ info, error }: Props) {
     );
   }
 
+  if (info.mode === "credit") {
+    const bal = info.balance_isk;
+    const stage = bal <= 500 ? "high" : bal <= 2000 ? "mid" : "ok";
+    const planLabel = info.plan ? formatPlanName(info.plan) : null;
+    return (
+      <div className="eva-usage">
+        {planLabel && <div className="eva-usage-plan">{planLabel}</div>}
+        <div className="eva-usage-label">Inneign</div>
+        <div className="eva-usage-row">
+          <div className={`eva-usage-pct eva-usage-pct-${stage}`} style={{ fontSize: 15, fontWeight: 700 }}>
+            {Math.round(bal).toLocaleString("is-IS")} kr
+          </div>
+        </div>
+        <div className="eva-usage-detail">
+          {bal <= 500
+            ? "Inneignin er að klárast — bættu við á app.evai.is"
+            : "Vinna Evu dregst af inneigninni þinni — hún fyrnist ekki"}
+        </div>
+      </div>
+    );
+  }
+
   // A user is blocked when EITHER cap is hit, so the bar tracks whichever
   // budget is closer to running out (matches the server's overCap logic).
   const outFrac = info.used.output_tokens / Math.max(1, info.cap.output_tokens);

@@ -520,6 +520,14 @@ async function fetchUsageFraction(
       cap?: { input_tokens?: number; output_tokens?: number };
       used?: { input_tokens?: number; output_tokens?: number };
     };
+    if (data.mode === "credit") {
+      const bal = (data as { balance_isk?: number }).balance_isk;
+      if (typeof bal !== "number") return null;
+      // Map remaining credit onto the same warn scale: <=1500 kr ≈ >70% used.
+      if (bal <= 0) return 1;
+      if (bal <= 1500) return Math.min(0.99, 1 - bal / 5000);
+      return 0;
+    }
     if (data.mode !== "metered" || !data.cap || !data.used) return null;
     const inFrac =
       (data.cap.input_tokens ?? 0) > 0

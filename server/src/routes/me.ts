@@ -30,6 +30,14 @@ meRoute.get("/", async (c) => {
   }
 
   const u = auth.user!;
+  if (u.credit_balance_isk !== null) {
+    return c.json({
+      mode: "credit",
+      name: u.name,
+      plan: u.plan ?? "innsyn",
+      balance_isk: Math.max(0, Math.round(u.credit_balance_isk)),
+    });
+  }
   return c.json({
     mode: "metered",
     name: u.name,

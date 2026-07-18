@@ -19,6 +19,9 @@ import {
   adjustCap,
   createUser,
   setUserPlan,
+  grantCredit,
+  listCreditEvents,
+  getDb,
   getUserActivity,
   monthUsageByModel,
   type User,
@@ -141,19 +144,42 @@ function planBadge(plan: PlanId): string {
 }
 
 function planButtons(u: User): string {
+  // Credit era: each click GRANTS the package's credit (repeat purchases add
+  // up) and stamps the plan label. Always enabled.
   return (Object.keys(PLANS) as PlanId[])
     .map((id) => {
       const p = PLANS[id];
       const active = u.plan === id;
       return `<form method="POST" action="/admin/users/${esc(u.id)}/plan" style="display:inline">
         <input type="hidden" name="plan" value="${esc(id)}">
-        <button type="submit" ${active ? "disabled" : ""} title="${esc(p.priceIsk.toLocaleString())} kr → $${p.apiCapUsd} API"
-          style="border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:${active ? "default" : "pointer"};
-          background:${active ? PLAN_COLORS[id] : "#f0e8f5"};color:${active ? "white" : "#6b1a2e"};opacity:${active ? 1 : 0.9}">
-          ${esc(p.displayName)}</button>
+        <button type="submit" title="bætir ${esc(p.priceIsk.toLocaleString())} kr inneign við"
+          style="border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;
+          background:${active ? PLAN_COLORS[id] : "#f0e8f5"};color:${active ? "white" : "#6b1a2e"}">
+          +${esc(p.displayName)} ${esc(p.priceIsk.toLocaleString())}</button>
       </form>`;
     })
     .join(" ");
+}
+
+/** Credit cell: balance, recent events, custom +/- adjustment form. */
+function creditCell(u: User): string {
+  const bal = u.credit_balance_isk;
+  const balHtml =
+    bal === null
+      ? `<span style="color:#bbb;font-size:12px">gamla kerfið (mánaðarþak)</span>`
+      : `<strong style="font-size:16px;color:${bal <= 500 ? "#c0392b" : "#1a7a4a"}">${Math.round(bal).toLocaleString()} kr</strong>`;
+  const events = listCreditEvents(u.id, 3)
+    .map(
+      (e) =>
+        `<div style="font-size:10px;color:#999">${esc(e.ts.slice(5, 16))} · ${e.delta_isk > 0 ? "+" : ""}${Math.round(e.delta_isk).toLocaleString()} kr · ${esc(e.reason)}</div>`,
+    )
+    .join("");
+  return `<div>${balHtml}${events}
+    <form method="POST" action="/admin/users/${esc(u.id)}/credit" style="display:flex;gap:4px;margin-top:6px">
+      <input type="number" name="amount" placeholder="kr" style="width:80px;padding:3px 6px;border:1.5px solid #e0d0e8;border-radius:6px;font-size:12px">
+      <button type="submit" name="op" value="add" style="background:#1a7a4a;color:white;border:none;border-radius:6px;padding:3px 8px;font-size:11px;cursor:pointer">+</button>
+      <button type="submit" name="op" value="sub" style="background:#c0392b;color:white;border:none;border-radius:6px;padding:3px 8px;font-size:11px;cursor:pointer">−</button>
+    </form></div>`;
 }
 
 /** "today 14:32" / "yesterday" / "5d ago" / "12 Jun" — compact and scannable. */
@@ -189,7 +215,7 @@ function activityCell(a: UserActivity): string {
 
 function rows(users: User[]): string {
   if (users.length === 0) {
-    return `<tr><td colspan="8" style="padding:32px;text-align:center;color:#aaa;font-size:13px">No users yet — add one above.</td></tr>`;
+    return `<tr><td colspan="9" style="padding:32px;text-align:center;color:#aaa;font-size:13px">No users yet — add one above.</td></tr>`;
   }
   return users
     .map((u) => {
@@ -202,6 +228,7 @@ function rows(users: User[]): string {
       <td style="padding:14px 16px;font-weight:500">${esc(u.name)}</td>
       <td style="padding:14px 16px">${badge}</td>
       <td style="padding:14px 16px">${planBadge(u.plan)}<div style="margin-top:6px">${planButtons(u)}</div></td>
+      <td style="padding:14px 16px">${creditCell(u)}</td>
       <td style="padding:14px 16px">${activityCell(activity)}</td>
       <td style="padding:14px 16px">${bar(u.period_input_tokens, u.monthly_cap_input_tokens, "#6b1a2e")}</td>
       <td style="padding:14px 16px">${bar(u.period_output_tokens, u.monthly_cap_output_tokens, "#7b3fc4")}</td>
@@ -239,7 +266,12 @@ function summaryHtml(users: User[]): string {
   const eventCost = monthCostUsd();
   // Event log starts 2026-07-07; period counters may predate it — show the max.
   const cost = Math.max(eventCost, estUsd(inTok, outTok));
-  const revenueIsk = active.reduce((s, u) => s + (PLANS[u.plan]?.priceIsk ?? 0), 0);
+  const purchasedIsk = (getDb()
+    .prepare(
+      "SELECT COALESCE(SUM(delta_isk),0) AS s FROM credit_events WHERE delta_isk > 0 AND ts >= date('now','start of month')",
+    )
+    .get() as { s: number }).s;
+  const outstandingIsk = active.reduce((s, u) => s + Math.max(0, u.credit_balance_isk ?? 0), 0);
   const stat = (label: string, value: string, sub?: string) =>
     `<div style="background:white;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.06);padding:16px 20px;min-width:170px">
       <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#999;font-weight:600">${label}</div>
@@ -248,7 +280,8 @@ function summaryHtml(users: User[]): string {
     </div>`;
   return `<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:26px">
     ${stat("Est. API cost this month", `$${cost.toFixed(2)}`, "priced per actual model — check vs Anthropic credits")}
-    ${stat("Plan revenue / month", `${revenueIsk.toLocaleString()} kr`, `${active.length} active user${active.length === 1 ? "" : "s"}`)}
+    ${stat("Keypt inneign í mánuðinum", `${Math.round(purchasedIsk).toLocaleString()} kr`, `${active.length} active user${active.length === 1 ? "" : "s"}`)}
+    ${stat("Útistandandi inneign", `${Math.round(outstandingIsk).toLocaleString()} kr`, "óunnin vinna sem búið er að greiða")}
     ${stat("Tokens this month", `${(inTok / 1e6).toFixed(1)}M in`, `${(outTok / 1e6).toFixed(2)}M out`)}
   </div>`;
 }
@@ -321,7 +354,7 @@ tr:not(:last-child) td { border-bottom:1px solid #faf0f5; }
   <div class="card">
     <table>
       <thead><tr>
-        <th>Name</th><th>Status</th><th>Plan</th><th>Activity</th>
+        <th>Name</th><th>Status</th><th>Pakkar</th><th>Inneign</th><th>Activity</th>
         <th>Input tokens</th><th>Output tokens</th><th>Est. cost</th><th>Actions</th>
       </tr></thead>
       <tbody>${rows(users)}</tbody>
@@ -413,7 +446,23 @@ adminRoute.post("/users/:id/plan", async (c) => {
   const body = await c.req.parseBody();
   const plan = String(body.plan ?? "");
   if (plan in PLANS) {
-    setUserPlan(c.req.param("id"), plan as PlanId);
+    const id = c.req.param("id");
+    setUserPlan(id, plan as PlanId);
+    grantCredit(id, PLANS[plan as PlanId].priceIsk, `admin:${plan}`);
+  }
+  return c.redirect("/admin");
+});
+
+adminRoute.post("/users/:id/credit", async (c) => {
+  const body = await c.req.parseBody();
+  const amount = Number(body.amount);
+  const op = String(body.op ?? "add");
+  if (Number.isFinite(amount) && amount > 0 && amount <= 1_000_000) {
+    grantCredit(
+      c.req.param("id"),
+      op === "sub" ? -amount : amount,
+      "admin:handvirkt",
+    );
   }
   return c.redirect("/admin");
 });
