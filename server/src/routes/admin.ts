@@ -175,10 +175,12 @@ function creditCell(u: User): string {
     )
     .join("");
   return `<div>${balHtml}${events}
-    <form method="POST" action="/admin/users/${esc(u.id)}/credit" style="display:flex;gap:4px;margin-top:6px">
-      <input type="number" name="amount" placeholder="kr" style="width:80px;padding:3px 6px;border:1.5px solid #e0d0e8;border-radius:6px;font-size:12px">
-      <button type="submit" name="op" value="add" style="background:#1a7a4a;color:white;border:none;border-radius:6px;padding:3px 8px;font-size:11px;cursor:pointer">+</button>
-      <button type="submit" name="op" value="sub" style="background:#c0392b;color:white;border:none;border-radius:6px;padding:3px 8px;font-size:11px;cursor:pointer">−</button>
+    <div style="margin-top:8px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#999;font-weight:600">Breyta inneign handvirkt</div>
+    <form method="POST" action="/admin/users/${esc(u.id)}/credit" style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap;align-items:center">
+      <input type="number" name="amount" placeholder="upphæð kr" min="1" style="width:90px;padding:4px 8px;border:1.5px solid #e0d0e8;border-radius:6px;font-size:12px">
+      <input type="text" name="reason" placeholder="ástæða (valfrjálst)" maxlength="60" style="width:130px;padding:4px 8px;border:1.5px solid #e0d0e8;border-radius:6px;font-size:12px">
+      <button type="submit" name="op" value="add" style="background:#1a7a4a;color:white;border:none;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;font-weight:600">+ Bæta við</button>
+      <button type="submit" name="op" value="sub" style="background:#c0392b;color:white;border:none;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;font-weight:600">− Draga frá</button>
     </form></div>`;
 }
 
@@ -457,11 +459,12 @@ adminRoute.post("/users/:id/credit", async (c) => {
   const body = await c.req.parseBody();
   const amount = Number(body.amount);
   const op = String(body.op ?? "add");
+  const note = String(body.reason ?? "").trim().slice(0, 60);
   if (Number.isFinite(amount) && amount > 0 && amount <= 1_000_000) {
     grantCredit(
       c.req.param("id"),
       op === "sub" ? -amount : amount,
-      "admin:handvirkt",
+      note ? `admin:${note}` : "admin:handvirkt",
     );
   }
   return c.redirect("/admin");
