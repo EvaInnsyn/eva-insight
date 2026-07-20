@@ -21,6 +21,7 @@ interface Props {
 
 export function FolderPicker({ value, onChange, visible }: Props) {
   const [folders, setFolders] = useState<Folder[] | null>(null);
+  const [listError, setListError] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -30,9 +31,18 @@ export function FolderPicker({ value, onChange, visible }: Props) {
     chrome.runtime
       .sendMessage({ type: "folders/list" })
       .then((res: { ok?: boolean; folders?: Folder[] }) => {
-        setFolders(res?.ok ? (res.folders ?? []) : []);
+        if (res?.ok) {
+          setFolders(res.folders ?? []);
+          setListError(false);
+        } else {
+          setFolders([]);
+          setListError(true);
+        }
       })
-      .catch(() => setFolders([]));
+      .catch(() => {
+        setFolders([]);
+        setListError(true);
+      });
   }, [visible, folders]);
 
   if (!visible) return null;
@@ -51,7 +61,18 @@ export function FolderPicker({ value, onChange, visible }: Props) {
     );
   }
 
-  const roots = (folders ?? []).filter((f) => f.parent_id === null).slice(0, 5);
+  // Allar möppur, nýlegast notaðar fyrst, með slóð svo undirmöppur þekkist.
+  const byId = new Map((folders ?? []).map((f) => [f.id, f]));
+  const pathLabel = (f: Folder): string => {
+    const parts = [f.name];
+    let cur = f.parent_id ? byId.get(f.parent_id) : undefined;
+    for (let hop = 0; cur && hop < 3; hop++) {
+      parts.unshift(cur.name);
+      cur = cur.parent_id ? byId.get(cur.parent_id) : undefined;
+    }
+    return parts.join(" › ");
+  };
+  const choices = (folders ?? []).slice(0, 8);
 
   const createFolder = async () => {
     const name = newName.trim();
@@ -75,18 +96,24 @@ export function FolderPicker({ value, onChange, visible }: Props) {
   return (
     <div className="eva-folder-picker">
       <div className="eva-folder-picker-label">Í hvaða möppu á verkið heima?</div>
+      {listError && (
+        <div className="eva-folder-picker-loading" style={{ marginBottom: 6 }}>
+          Náði ekki möppulistanum, skráðu þig inn aftur í stillingum ef þetta lagast ekki.
+        </div>
+      )}
       <div className="eva-folder-picker-chips">
         {folders === null ? (
           <span className="eva-folder-picker-loading">Sæki möppur…</span>
         ) : (
           <>
-            {roots.map((f) => (
+            {choices.map((f) => (
               <button
                 key={f.id}
                 type="button"
+                title={pathLabel(f)}
                 onClick={() => onChange({ id: f.id, name: f.name })}
               >
-                📁 {f.name}
+                📁 {pathLabel(f)}
               </button>
             ))}
             {creating ? (
