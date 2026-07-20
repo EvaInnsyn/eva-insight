@@ -31,6 +31,7 @@ import {
   waitForSettleInActivePage,
 } from "../page-bridge";
 import { runChat, saveMemory } from "../proxy-client";
+import { PLATFORM } from "../../shared/platform";
 import type { EvaSettings } from "../settings";
 
 export type ToolHandler = (input: any) => Promise<unknown>;
@@ -1519,6 +1520,55 @@ const HANDLERS: Record<string, ToolHandler> = {
     return entries.length
       ? { requests: entries }
       : { requests: [], note: "No requests captured yet — recording happens while Eva acts on the page." };
+  },
+
+  /**
+   * Vista skrá af vefslóð beint í verkefnamöppu notandans á Eva-platforminum.
+   * Beina leiðin: ekkert vafur, eitt API-kall.
+   */
+  async save_to_folder({ folder, url, filename }: { folder: string; url: string; filename?: string }) {
+    requireString(folder, "folder");
+    requireString(url, "url");
+    if (!/^https?:\/\//i.test(url)) throw new Error("url must be http(s)");
+    if (!authCtx?.accessToken) {
+      throw new Error("notandinn er ekki tengdur Eva-platforminum (skrá inn í stillingum)");
+    }
+    const headers = { Authorization: `Bearer ${authCtx.accessToken}` };
+
+    // Finna möppuna: nákvæmt id, svo nafn (case-insensitive), svo hlutstrengur.
+    const listRes = await fetch(`${PLATFORM.apiUrl}${PLATFORM.foldersPath}`, { headers });
+    if (!listRes.ok) throw new Error(`náði ekki möppulistanum (HTTP ${listRes.status})`);
+    const listBody = (await listRes.json()) as {
+      data?: { folders?: { id: string; name: string }[] };
+    };
+    const folders = listBody.data?.folders ?? [];
+    const q = folder.trim().toLowerCase();
+    const match =
+      folders.find((f) => f.id === folder) ??
+      folders.find((f) => f.name.toLowerCase() === q) ??
+      folders.find((f) => f.name.toLowerCase().includes(q));
+    if (!match) {
+      throw new Error(
+        `fann enga möppu sem heitir "${folder}" — til: ${folders.slice(0, 8).map((f) => f.name).join(", ") || "engar möppur"}`,
+      );
+    }
+
+    const upRes = await fetch(`${PLATFORM.apiUrl}${PLATFORM.folderUploadPath(match.id)}`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ url, ...(filename ? { filename } : {}) }),
+    });
+    const upBody = (await upRes.json().catch(() => null)) as
+      | { data?: { file?: { name?: string } }; error?: string }
+      | null;
+    if (!upRes.ok) {
+      throw new Error(upBody?.error ?? `upphleðsla mistókst (HTTP ${upRes.status})`);
+    }
+    return {
+      saved: true,
+      folder: match.name,
+      file: upBody?.data?.file?.name ?? filename ?? url.split("/").pop(),
+    };
   },
 
   /**

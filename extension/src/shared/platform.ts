@@ -19,6 +19,8 @@ export const PLATFORM = {
   foldersPath: "/api/extension/folders",
   /** Minni Evu úr einni möppu (síðustu lotur). */
   folderMemoryPath: (id: string) => `/api/extension/folders/${id}/memory`,
+  /** Vista skrá (af vefslóð) beint í verkefnamöppu. */
+  folderUploadPath: (id: string) => `/api/extension/folders/${id}/upload`,
   /** Supabase project URL (same project the platform uses). */
   supabaseUrl: "https://joqeipjawrlnscdvsgna.supabase.co",
   /** Supabase anon key — public by design; RLS enforces all access. */

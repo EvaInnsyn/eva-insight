@@ -94,6 +94,7 @@ export function labelFor(name: string, input?: unknown): string {
   switch (name) {
     case "find": return "Leitar";
     case "remember": return "Uppfærir minnið";
+    case "save_to_folder": return "Vistar í möppu";
     case "javascript_eval": return "Keyrir skriftu";
     case "get_page_text": return "Les textann";
     case "upload_image": return "Hleður upp skrá";
@@ -127,6 +128,7 @@ function iconFor(name: string): string {
     case "computer": return "🖱";
     case "batch_actions": return "⚡";
     case "remember": return "🧠";
+    case "save_to_folder": return "📁";
     case "find": return "🔎";
     case "javascript_eval": return "🧪";
     case "get_page_text": return "📖";

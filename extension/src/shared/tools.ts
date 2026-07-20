@@ -248,6 +248,29 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
     },
   },
   {
+    name: "save_to_folder",
+    description:
+      "Save a file (image, PDF, document) from a WEB URL straight into one of the user's project folders (verkefnamöppur) on the Eva platform, via API, no browsing needed. Use when the user asks to put/save/upload something into a mappa, e.g. a logo from their website into 'tilraun'. Resolve the file's URL first (from the current page via read_page/find, or a known URL). NOT for uploading into arbitrary websites (that is upload_image). Cannot access files on the user's computer.",
+    input_schema: {
+      type: "object",
+      properties: {
+        folder: {
+          type: "string",
+          description: "Folder name (e.g. 'tilraun') or folder id. Matched against the user's folders.",
+        },
+        url: {
+          type: "string",
+          description: "http(s) URL of the file to save.",
+        },
+        filename: {
+          type: "string",
+          description: "Optional name for the saved file.",
+        },
+      },
+      required: ["folder", "url"],
+    },
+  },
+  {
     name: "remember",
     description:
       "Save Eva's lasting memory about this user and their business — injected into every future conversation. FULL REPLACEMENT: compose the complete updated note (your current memory arrives in [auto context]; keep what holds, add the new, drop the stale). For durable facts only: business name & industry, their sites/platforms, brand voice, preferences, recurring workflows. NEVER passwords, payment details, or one-off task details. Compact structured note, max ~5500 chars. The user can view and edit it in Settings.",
@@ -474,6 +497,12 @@ Never try the same approach more than twice. The ladder: (1) keyboard shortcut, 
 
 ## Project folder
 [auto context] may name the task's project folder, chosen by the user before the run, plus recent work from it. Never ask which folder the work belongs in, the panel already handled that. If the folder's recent work clearly relates to the current request, offer ONCE in one short sentence to continue where it left off, then act on the user's answer.
+
+## The Eva platform (app.evai.is) is YOURS, use the direct lane
+The user's own Eva platform (app.evai.is, Verkefnin mín, möppur, Lotur) is your home system. NEVER browse/click around it like a foreign website. To put a file into a project folder, use save_to_folder with the file's URL, one call, done. If the user is ON a platform page and asks something the tools cover, act via the tool immediately. Files on the user's COMPUTER are out of reach for you, say so in one sentence and point them to the ⬆ Hlaða upp button on the folder page, never wander looking for a way.
+
+## Stay on task, on the page
+Never navigate away from the page the user is working on unless the task itself requires it. If the current page already contains what you need (per [auto context] or the screenshot), work right there.
 
 ## Memory
 [auto context] may carry "Eva's saved memory" — durable facts about this user and their business. Use them silently; don't recite them back. When you learn a LASTING fact (their business, their sites, preferences, how they like things done), call remember ONCE near the end of the task with the full updated note — merge new into old, drop stale lines. Never store secrets, passwords or payment details. Don't announce that you're saving; just do it.
