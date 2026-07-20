@@ -1269,3 +1269,14 @@ textarea {
 .eva-folder-picked .eva-link {
   font-size: 11px;
 }
+
+.eva-tool-count {
+  flex: 0 0 auto;
+  background: var(--eva-frame);
+  color: var(--eva-text-on-red);
+  border-radius: 999px;
+  padding: 0 7px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+}

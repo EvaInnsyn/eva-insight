@@ -1,7 +1,7 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { ChatMessage, ChatToolCall } from "@/shared/chat";
-import { ToolCall } from "./ToolCall";
+import { ToolCall, labelFor } from "./ToolCall";
 import { ThinkingEye } from "./ThinkingEye";
 
 export function Message({ message }: { message: ChatMessage }) {
@@ -53,6 +53,21 @@ export function Message({ message }: { message: ChatMessage }) {
  * ("✓ 6 aðgerðir") you can expand to inspect. Keeps the transcript calm
  * instead of a wall of tool cards + narration.
  */
+/** Samliggjandi skref með sömu merkingu renna saman í eitt kort með ×N. */
+function groupCalls(calls: { id: string; name: string; input?: unknown }[]) {
+  const out: { call: (typeof calls)[number]; count: number }[] = [];
+  for (const c of calls) {
+    const label = labelFor(c.name, c.input);
+    const prev = out[out.length - 1];
+    if (prev && labelFor(prev.call.name, prev.call.input) === label) {
+      prev.count += 1;
+    } else {
+      out.push({ call: c, count: 1 });
+    }
+  }
+  return out;
+}
+
 function ActivityGroup({
   calls,
   streaming,
@@ -68,8 +83,8 @@ function ActivityGroup({
   if (streaming) {
     return (
       <div className="eva-tools">
-        {calls.map((c) => (
-          <ToolCall key={c.id} call={c} />
+        {groupCalls(calls).map(({ call: c, count }) => (
+          <ToolCall key={c.id} call={c as never} count={count} />
         ))}
         <ThinkingEye />
       </div>
@@ -95,8 +110,8 @@ function ActivityGroup({
       </button>
       {open ? (
         <div className="eva-tools">
-          {calls.map((c) => (
-            <ToolCall key={c.id} call={c} />
+          {groupCalls(calls).map(({ call: c, count }) => (
+            <ToolCall key={c.id} call={c as never} count={count} />
           ))}
         </div>
       ) : null}

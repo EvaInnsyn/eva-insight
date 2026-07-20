@@ -3,9 +3,11 @@ import type { ChatToolCall } from "@/shared/chat";
 
 interface Props {
   call: ChatToolCall;
+  /** Samliggjandi eins skref renna saman í eitt kort með teljara. */
+  count?: number;
 }
 
-export function ToolCall({ call }: Props) {
+export function ToolCall({ call, count }: Props) {
   const [open, setOpen] = useState(false);
   const isRunning = !call.finishedAt;
   const isError = call.isError === true;
@@ -28,6 +30,9 @@ export function ToolCall({ call }: Props) {
         <span className={`eva-tool-status ${statusClass}`} />
         <span className="eva-tool-icon" aria-hidden>{iconFor(call.name)}</span>
         <span className="eva-tool-name">{label}</span>
+        {count && count > 1 ? (
+          <span className="eva-tool-count">×{count}</span>
+        ) : null}
         {summary ? <span className="eva-tool-summary">{summary}</span> : null}
         <span className="eva-tool-caret">{open ? "▾" : "▸"}</span>
       </button>
@@ -56,63 +61,63 @@ export function ToolCall({ call }: Props) {
 }
 
 const COMPUTER_ACTION_LABELS: Record<string, string> = {
-  screenshot: "Looking at screen",
-  zoom: "Looking closer",
-  left_click: "Clicking",
-  right_click: "Right-clicking",
-  middle_click: "Clicking",
-  double_click: "Double-clicking",
-  triple_click: "Selecting line",
-  left_click_drag: "Dragging",
-  left_mouse_down: "Pressing mouse",
-  left_mouse_up: "Releasing mouse",
-  mouse_move: "Moving cursor",
-  type: "Typing",
-  key: "Pressing key",
-  hold_key: "Holding key",
-  scroll: "Scrolling",
-  wait: "Waiting",
-  cursor_position: "Checking cursor",
-  hover: "Hovering",
-  scroll_to: "Scrolling to element",
+  screenshot: "Skoðar skjáinn",
+  zoom: "Rýnir nánar",
+  left_click: "Smellir",
+  right_click: "Hægrismellir",
+  middle_click: "Smellir",
+  double_click: "Tvísmellir",
+  triple_click: "Velur línu",
+  left_click_drag: "Dregur",
+  left_mouse_down: "Heldur músartakka",
+  left_mouse_up: "Sleppir músartakka",
+  mouse_move: "Færir bendil",
+  type: "Skrifar",
+  key: "Ýtir á",
+  hold_key: "Heldur takka",
+  scroll: "Skrunar",
+  wait: "Bíður",
+  cursor_position: "Athugar bendil",
+  hover: "Heldur bendli yfir",
+  scroll_to: "Skrunar að",
 };
 
-function labelFor(name: string, input?: unknown): string {
+export function labelFor(name: string, input?: unknown): string {
   if (name === "computer") {
     const action = (input as { action?: string } | null)?.action ?? "";
-    return COMPUTER_ACTION_LABELS[action] ?? "Using the page";
+    return COMPUTER_ACTION_LABELS[action] ?? "Vinnur á síðunni";
   }
   if (name === "batch_actions") {
     const n = (input as { actions?: unknown[] } | null)?.actions?.length ?? 0;
-    return n > 0 ? `${n} quick steps` : "Quick steps";
+    return n > 0 ? `${n} skref í einu` : "Mörg skref í einu";
   }
   switch (name) {
-    case "find": return "Finding";
-    case "remember": return "Updating memory";
-    case "javascript_eval": return "Running script";
-    case "get_page_text": return "Reading text";
-    case "upload_image": return "Uploading file";
-    case "read_console": return "Checking console";
-    case "read_network": return "Checking network";
-    case "hover": return "Hovering";
-    case "read_page": return "Reading page";
-    case "get_active_tab": return "Checking tab";
-    case "click": return "Clicking";
-    case "click_at_coordinate": return "Clicking";
-    case "double_click_at_coordinate": return "Double-clicking";
-    case "type": return "Typing";
-    case "type_at_cursor": return "Typing";
-    case "key_press": return "Pressing key";
-    case "scroll": return "Scrolling";
-    case "scroll_to": return "Scrolling";
-    case "navigate": return "Opening page";
-    case "screenshot": return "Looking at screen";
-    case "wait": return "Waiting";
-    case "form_input": return "Setting field";
-    case "tabs_list": return "Listing tabs";
-    case "tabs_create": return "New tab";
-    case "tabs_switch": return "Switching tab";
-    case "tabs_close": return "Closing tab";
+    case "find": return "Leitar";
+    case "remember": return "Uppfærir minnið";
+    case "javascript_eval": return "Keyrir skriftu";
+    case "get_page_text": return "Les textann";
+    case "upload_image": return "Hleður upp skrá";
+    case "read_console": return "Skoðar villuskrá";
+    case "read_network": return "Skoðar netumferð";
+    case "hover": return "Heldur bendli yfir";
+    case "read_page": return "Les síðuna";
+    case "get_active_tab": return "Athugar flipann";
+    case "click": return "Smellir";
+    case "click_at_coordinate": return "Smellir";
+    case "double_click_at_coordinate": return "Tvísmellir";
+    case "type": return "Skrifar";
+    case "type_at_cursor": return "Skrifar";
+    case "key_press": return "Ýtir á";
+    case "scroll": return "Skrunar";
+    case "scroll_to": return "Skrunar að";
+    case "navigate": return "Opnar síðu";
+    case "screenshot": return "Skoðar skjáinn";
+    case "wait": return "Bíður";
+    case "form_input": return "Stillir reit";
+    case "tabs_list": return "Skoðar flipa";
+    case "tabs_create": return "Opnar nýjan flipa";
+    case "tabs_switch": return "Skiptir um flipa";
+    case "tabs_close": return "Lokar flipa";
     default: return name;
   }
 }
