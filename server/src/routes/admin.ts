@@ -133,7 +133,7 @@ function estUsd(inputTokens: number, outputTokens: number): number {
 
 const PLAN_COLORS: Record<PlanId, string> = {
   innsyn: "#8a7aa0",
-  yfirsyn: "#7b3fc4",
+  yfirsyn: "#be3519",
   umsja: "#6b1a2e",
 };
 
@@ -205,7 +205,7 @@ function activityCell(a: UserActivity): string {
         : `${Math.round(a.avgSessionMin)} min`;
   const platform =
     a.requests30d > 0 && a.platformShare > 0
-      ? `<div style="color:#7b3fc4">${Math.round(a.platformShare * 100)}% via platform</div>`
+      ? `<div style="color:#be3519">${Math.round(a.platformShare * 100)}% via platform</div>`
       : "";
   return `<div style="font-size:12px;line-height:1.7;color:#555">
     <div>Last: ${fmtLastActive(a.lastActive)}</div>
@@ -233,7 +233,7 @@ function rows(users: User[]): string {
       <td style="padding:14px 16px">${creditCell(u)}</td>
       <td style="padding:14px 16px">${activityCell(activity)}</td>
       <td style="padding:14px 16px">${bar(u.period_input_tokens, u.monthly_cap_input_tokens, "#6b1a2e")}</td>
-      <td style="padding:14px 16px">${bar(u.period_output_tokens, u.monthly_cap_output_tokens, "#7b3fc4")}</td>
+      <td style="padding:14px 16px">${bar(u.period_output_tokens, u.monthly_cap_output_tokens, "#be3519")}</td>
       <td style="padding:14px 16px;font-size:12px;color:#555">$${monthCostUsd(u.id).toFixed(2)}</td>
       <td style="padding:14px 16px">
         ${
