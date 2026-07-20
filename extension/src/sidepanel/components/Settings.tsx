@@ -181,7 +181,7 @@ export function Settings({ open, onClose }: Props) {
                   {platform.error}
                 </span>
               ) : null}
-              <span style={{ color: "#888780", fontSize: 11 }}>
+              <span style={{ color: "#8a8378", fontSize: 11 }}>
                 Notaðu sama aðgang og á eva-innsyn.vercel.app
               </span>
             </div>
@@ -192,13 +192,13 @@ export function Settings({ open, onClose }: Props) {
         {platform.status.connected && (
           <div className="eva-field">
             <span className="eva-field-label">Minni Evu</span>
-            <span style={{ color: "#888780", fontSize: 11 }}>
-              Eva man þetta á milli samtala — um fyrirtækið þitt, síðurnar
+            <span style={{ color: "#8a8378", fontSize: 11 }}>
+              Eva man þetta á milli samtala, um fyrirtækið þitt, síðurnar
               þínar og hvernig þú vilt hafa hlutina. Hún uppfærir það sjálf;
               þú mátt breyta eða hreinsa.
             </span>
             {memory === null ? (
-              <span style={{ color: "#888780", fontSize: 12 }}>Sæki…</span>
+              <span style={{ color: "#8a8378", fontSize: 12 }}>Sæki…</span>
             ) : (
               <>
                 <textarea
@@ -207,7 +207,7 @@ export function Settings({ open, onClose }: Props) {
                   rows={5}
                   style={{ resize: "vertical", fontSize: 12, lineHeight: 1.4 }}
                   onChange={(e) => setMemory(e.target.value)}
-                  placeholder="Ekkert vistað enn — Eva bætir við þegar hún kynnist þér."
+                  placeholder="Ekkert vistað enn, Eva bætir við þegar hún kynnist þér."
                 />
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <button
@@ -229,7 +229,7 @@ export function Settings({ open, onClose }: Props) {
                     Hreinsa
                   </button>
                   {memoryMsg && (
-                    <span style={{ fontSize: 11, color: "#888780" }}>{memoryMsg}</span>
+                    <span style={{ fontSize: 11, color: "#8a8378" }}>{memoryMsg}</span>
                   )}
                 </div>
               </>
@@ -269,7 +269,7 @@ export function Settings({ open, onClose }: Props) {
         <button
           type="button"
           className="eva-link"
-          style={{ fontSize: 11, color: "#888780", alignSelf: "flex-start" }}
+          style={{ fontSize: 11, color: "#8a8378", alignSelf: "flex-start" }}
           onClick={() => setShowAdvanced((v) => !v)}
         >
           {showAdvanced ? "Hide advanced" : "Advanced"}

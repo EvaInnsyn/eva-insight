@@ -39,8 +39,8 @@ export function UsageBar({ info, error }: Props) {
         </div>
         <div className="eva-usage-detail">
           {bal <= 500
-            ? "Inneignin er að klárast — bættu við á app.evai.is"
-            : "Vinna Evu dregst af inneigninni þinni — hún fyrnist ekki"}
+            ? "Inneignin er að klárast, bættu við á app.evai.is"
+            : "Vinna Evu dregst af inneigninni þinni, hún fyrnist ekki"}
         </div>
       </div>
     );

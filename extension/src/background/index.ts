@@ -551,11 +551,11 @@ function pauseNote(usageFraction: number | null): string {
   if (usageFraction != null && usageFraction >= 0.7) {
     const pct = Math.min(99, Math.round(usageFraction * 100));
     return (
-      `\n\n_Ég hef tekið mörg skref og geri hlé hér. ⚠️ Þú ert búin að nota um **${pct}%** af Eva-notkuninni þinni í þessum mánuði — ef ég held áfram gæti þetta verk klárað stóran hluta af því sem eftir er. Skrifaðu **haltu áfram** ef þú vilt samt að ég haldi áfram._`
+      `\n\n_Ég hef tekið mörg skref og geri hlé hér. ⚠️ Þú ert búin að nota um **${pct}%** af Eva-notkuninni þinni í þessum mánuði. Ef ég held áfram gæti þetta verk klárað stóran hluta af því sem eftir er. Skrifaðu **haltu áfram** ef þú vilt samt að ég haldi áfram._`
     );
   }
   return (
-    "\n\n_Ég hef tekið mörg skref og geri hlé hér. Verkinu er kannski ekki alveg lokið — skrifaðu **haltu áfram** og ég held áfram þaðan sem frá var horfið._"
+    "\n\n_Ég hef tekið mörg skref og geri hlé hér. Verkinu er kannski ekki alveg lokið, skrifaðu **haltu áfram** og ég held áfram þaðan sem frá var horfið._"
   );
 }
 
@@ -589,7 +589,7 @@ function buildSessionSummary(
   const outcome = finalReply
     ? clipText(finalReply, 400)
     : `${actionCount} aðgerðir framkvæmdar.`;
-  return paused ? `Í bið — verki ekki lokið. ${outcome}` : outcome;
+  return paused ? `Í bið, verki ekki lokið. ${outcome}` : outcome;
 }
 
 function clipText(s: string, max: number): string {

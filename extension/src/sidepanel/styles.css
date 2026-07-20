@@ -1,8 +1,8 @@
 /*
  * Eva Insight side panel — light palette.
  *
- *   #fde6e6  background (page + frame interiors)
- *   #be3519  text + frame borders + accents
+ *   #fffdfa  paper ground · #ffffff surfaces
+ *   #be3519  red ink (frames + accents) · #16130f body text
  *
  * Typography
  *   League Spartan (700)  → "Eva Insight" wordmark only
@@ -44,14 +44,16 @@
 }
 
 :root {
-  --eva-bg: #fde6e6;
-  --eva-bg-dim: #f7d7d7;
+  /* 2026-07 design language: paper ground, white surfaces, red ink, black text */
+  --eva-bg: #fffdfa;
+  --eva-surface: #ffffff;
+  --eva-bg-dim: #f6f2eb;
   --eva-frame: #be3519;
   --eva-frame-dim: rgba(190, 53, 25, 0.35);
-  --eva-text: #be3519;
-  --eva-text-dim: #c66b5c;
-  --eva-text-faint: #d99c8e;
-  --eva-text-on-red: #fde6e6;
+  --eva-text: #16130f;
+  --eva-text-dim: #8a8378;
+  --eva-text-faint: #b9b2a6;
+  --eva-text-on-red: #ffffff;
 
   --eva-danger: #be3519;
 
@@ -116,7 +118,7 @@ textarea {
   font-weight: 700;
   font-size: 18px;
   letter-spacing: 0.6px;
-  color: var(--eva-text);
+  color: var(--eva-frame);
   text-transform: uppercase;
 }
 
@@ -229,7 +231,7 @@ textarea {
 .eva-link {
   background: none;
   border: none;
-  color: var(--eva-text);
+  color: var(--eva-frame);
   cursor: pointer;
   text-decoration: underline;
   font: inherit;
@@ -287,7 +289,7 @@ textarea {
   font-family: var(--eva-font-wordmark);
   font-weight: 700;
   font-size: 22px;
-  color: var(--eva-text);
+  color: var(--eva-frame);
   letter-spacing: 0.6px;
   text-transform: uppercase;
 }
@@ -324,7 +326,7 @@ textarea {
   font-size: 14px;
   line-height: 1.55;
   border: 1px solid var(--eva-frame);
-  background: var(--eva-bg);
+  background: var(--eva-surface);
   color: var(--eva-text);
 }
 
@@ -409,7 +411,7 @@ textarea {
   text-transform: uppercase;
   margin: 0.8em 0 0.3em;
   font-size: 13px;
-  color: var(--eva-text);
+  color: var(--eva-frame);
 }
 .eva-msg-text h1:first-child,
 .eva-msg-text h2:first-child,
@@ -449,8 +451,8 @@ textarea {
 /* User bubble — invert markdown colours */
 .eva-msg-user .eva-msg-text strong { color: var(--eva-text-on-red); }
 .eva-msg-user .eva-msg-text code {
-  background: rgba(253,230,230,0.2);
-  border-color: rgba(253,230,230,0.35);
+  background: rgba(255,255,255,0.22);
+  border-color: rgba(255,255,255,0.4);
   color: var(--eva-text-on-red);
 }
 
@@ -467,7 +469,7 @@ textarea {
   border: 1px solid var(--eva-frame);
   border-radius: 8px;
   overflow: hidden;
-  background: var(--eva-bg);
+  background: var(--eva-surface);
 }
 
 .eva-tool-header {
@@ -476,7 +478,7 @@ textarea {
   gap: 8px;
   width: 100%;
   padding: 7px 10px;
-  background: var(--eva-bg-dim);
+  background: transparent;
   border: none;
   cursor: pointer;
   color: var(--eva-text);
@@ -487,7 +489,7 @@ textarea {
 }
 
 .eva-tool-header:hover {
-  background: var(--eva-bg);
+  background: var(--eva-bg-dim);
 }
 
 .eva-tool-status {
@@ -584,7 +586,7 @@ textarea {
 }
 
 .eva-activity-badge.err {
-  background: var(--eva-bg);
+  background: var(--eva-surface);
   color: var(--eva-frame);
   box-shadow: inset 0 0 0 1.5px var(--eva-frame);
 }
@@ -634,7 +636,7 @@ textarea {
 
 .eva-msg-user .eva-tool {
   /* User-bubble side never shows tool calls but if it ever does, invert */
-  background: var(--eva-bg);
+  background: var(--eva-surface);
   color: var(--eva-text);
 }
 
@@ -653,7 +655,7 @@ textarea {
 }
 
 .eva-confirm {
-  background: var(--eva-bg);
+  background: var(--eva-surface);
   border: 1px solid var(--eva-frame);
   border-radius: 12px;
   padding: 16px;
@@ -671,7 +673,7 @@ textarea {
   font-size: 11px;
   letter-spacing: 1.2px;
   text-transform: uppercase;
-  color: var(--eva-text);
+  color: var(--eva-frame);
 }
 
 .eva-confirm-body {
@@ -741,7 +743,7 @@ textarea {
   align-items: center;
   gap: 4px;
   padding: 4px 4px 4px 10px;
-  background: var(--eva-bg-dim);
+  background: var(--eva-surface);
   border: 1px solid var(--eva-frame);
   border-radius: 999px;
   font-size: 11px;
@@ -777,7 +779,7 @@ textarea {
   flex-direction: column;
   gap: 6px;
   padding: 8px 10px;
-  background: var(--eva-bg-dim);
+  background: var(--eva-surface);
   border: 1px solid var(--eva-frame);
   border-radius: 8px;
 }
@@ -823,7 +825,7 @@ textarea {
 .eva-usage-bar {
   flex: 1 1 auto;
   height: 8px;
-  background: var(--eva-bg);
+  background: var(--eva-bg-dim);
   border: 1px solid var(--eva-frame-dim);
   border-radius: 999px;
   overflow: hidden;
@@ -1021,7 +1023,7 @@ textarea {
 .eva-input {
   flex: 1 1 auto;
   resize: none;
-  background: var(--eva-bg);
+  background: var(--eva-surface);
   color: var(--eva-text);
   border: 1px solid var(--eva-frame);
   border-radius: 10px;
@@ -1075,7 +1077,7 @@ textarea {
 }
 
 .eva-btn-send:disabled {
-  background: var(--eva-bg);
+  background: var(--eva-bg-dim);
   color: var(--eva-text-faint);
   border-color: var(--eva-text-faint);
   cursor: not-allowed;
@@ -1130,7 +1132,7 @@ textarea {
 }
 
 .eva-text {
-  background: var(--eva-bg);
+  background: var(--eva-surface);
   color: var(--eva-text);
   border: 1px solid var(--eva-frame);
   border-radius: 8px;
