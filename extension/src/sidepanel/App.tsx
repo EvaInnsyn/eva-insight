@@ -115,7 +115,7 @@ export function App() {
       <FolderPicker
         value={folder}
         onChange={setFolder}
-        visible={platform.status.connected && messages.length === 0}
+        visible={platform.status.connected}
       />
 
       <Composer
