@@ -261,6 +261,8 @@ export interface AgentCallbacks {
 }
 
 export interface AgentLoopArgs {
+  /** Verkefnamappan sem verkið vistast í, með minni Evu úr möppunni. */
+  taskFolder?: { id: string; name: string; memory?: string };
   settings: EvaSettings;
   /** Supabase access token for Railway auth — overrides settings.sharedSecret. */
   accessToken?: string | null;
@@ -274,7 +276,7 @@ export interface AgentLoopArgs {
 export async function runAgentLoop(
   args: AgentLoopArgs,
 ): Promise<{ info: ChatStopInfo; messages: ProxyMessage[]; paused: boolean }> {
-  const { settings, accessToken, signal, callbacks } = args;
+  const { settings, accessToken, signal, callbacks, taskFolder } = args;
   const messages: ProxyMessage[] = [...args.initialMessages];
 
   // Live copy of allowed domains (we may add to it mid-loop).
@@ -315,6 +317,12 @@ export async function runAgentLoop(
     const memory = await memoryPromise;
     if (memory) {
       ctx += `\n\n[auto context] Eva's saved memory about this user (keep current via the remember tool):\n${memory}`;
+    }
+    if (taskFolder) {
+      ctx += `\n\n[auto context] This task is filed in the project folder "${taskFolder.name}" (chosen by the user in the panel; never re-ask which folder).`;
+      if (taskFolder.memory) {
+        ctx += ` Recent work in this folder:\n${taskFolder.memory}\nIf the current request clearly continues that earlier work, briefly offer to pick up where it left off before starting; otherwise just proceed.`;
+      }
     }
     if (ctx) {
       const last = messages[messages.length - 1];

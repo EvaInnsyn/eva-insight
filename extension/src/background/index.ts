@@ -18,6 +18,7 @@ import type { ChatMessage, ProxyMessage } from "../shared/chat";
 import { readSettings } from "./settings";
 import { fetchMemory, saveMemory, ProxyError } from "./proxy-client";
 import { runAgentLoop } from "./agent-loop";
+import { PLATFORM } from "../shared/platform";
 import { loadHistory, saveHistory } from "./session-store";
 import {
   clickInActivePage,
@@ -127,7 +128,7 @@ async function handlePortMessage(
       return;
     }
     case "chat/send":
-      await startStream(port, msg.messages, msg.assistantMessageId);
+      await startStream(port, msg.messages, msg.assistantMessageId, msg.folder);
       return;
     case "chat/confirmResponse": {
       const pending = pendingConfirms.get(msg.requestId);
@@ -152,6 +153,7 @@ async function startStream(
   port: chrome.runtime.Port,
   messages: ProxyMessage[],
   assistantMessageId: string,
+  folder?: { id: string; name: string } | { skip: true },
 ): Promise<void> {
   // Cancel any prior stream on this port.
   const prior = activeStreams.get(port);
@@ -159,6 +161,33 @@ async function startStream(
 
   const settings = await readSettings();
   const accessToken = await getAccessToken();
+
+  // Verkefnamappa þessa verks: sæki minni Evu úr möppunni (síðustu lotur)
+  // svo hún geti boðið að halda áfram þar sem frá var horfið.
+  let taskFolder: { id: string; name: string; memory?: string } | undefined;
+  if (folder && "id" in folder && accessToken) {
+    taskFolder = { id: folder.id, name: folder.name };
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 2500);
+      const res = await fetch(
+        `${PLATFORM.apiUrl}${PLATFORM.folderMemoryPath(folder.id)}`,
+        { headers: { Authorization: `Bearer ${accessToken}` }, signal: ctrl.signal },
+      );
+      clearTimeout(t);
+      if (res.ok) {
+        const body = (await res.json()) as {
+          data?: { recent_sessions?: { title: string; summary: string | null }[] };
+        };
+        const rows = (body.data?.recent_sessions ?? [])
+          .slice(0, 4)
+          .map((r) => `- ${r.title}${r.summary ? `: ${r.summary.slice(0, 220)}` : ""}`);
+        if (rows.length > 0) taskFolder.memory = rows.join("\n");
+      }
+    } catch {
+      // minni er kaupbætir, aldrei fyrirstaða
+    }
+  }
 
   // Require either a Supabase login (accessToken) or a dev shared secret.
   if (!settings.proxyUrl.trim()) {
@@ -192,6 +221,7 @@ async function startStream(
     const { info, paused, messages: finalMessages } = await runAgentLoop({
       settings,
       accessToken,
+      taskFolder,
       initialMessages: messages,
       signal: controller.signal,
       callbacks: {
@@ -278,6 +308,7 @@ async function startStream(
       sessionActions,
       sessionStartedAt,
       buildSessionSummary(finalMessages, paused, sessionActions.length),
+      taskFolder?.id,
     );
   } catch (err) {
     if (controller.signal.aborted) {
@@ -358,6 +389,43 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           },
         }),
       );
+    return true;
+  }
+
+  // Verkefnamöppur: panel-veljarinn sækir/býr til möppur gegnum background
+  // (sem heldur á aðgangslyklinum).
+  if (m.type === "folders/list") {
+    (async () => {
+      const token = await getAccessToken();
+      if (!token) { sendResponse({ ok: false, error: "not_connected" }); return; }
+      const res = await fetch(`${PLATFORM.apiUrl}${PLATFORM.foldersPath}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = (await res.json().catch(() => null)) as
+        | { data?: { folders?: unknown[] } }
+        | null;
+      sendResponse(res.ok ? { ok: true, folders: body?.data?.folders ?? [] } : { ok: false, error: `HTTP ${res.status}` });
+    })().catch((err) =>
+      sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }),
+    );
+    return true;
+  }
+  if (m.type === "folders/create") {
+    (async () => {
+      const token = await getAccessToken();
+      if (!token) { sendResponse({ ok: false, error: "not_connected" }); return; }
+      const res = await fetch(`${PLATFORM.apiUrl}${PLATFORM.foldersPath}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: String((message as { name?: string }).name ?? "") }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | { data?: { folder?: unknown } }
+        | null;
+      sendResponse(res.ok ? { ok: true, folder: body?.data?.folder } : { ok: false, error: `HTTP ${res.status}` });
+    })().catch((err) =>
+      sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }),
+    );
     return true;
   }
 
@@ -478,6 +546,7 @@ async function maybePushSession(
   actions: SessionAction[],
   startedAt: string,
   summary?: string,
+  projectId?: string,
 ): Promise<void> {
   if (actions.length === 0) return;
   try {
@@ -487,6 +556,7 @@ async function maybePushSession(
       startedAt,
       endedAt: new Date().toISOString(),
       summary,
+      projectId,
     });
     if (result.ok) {
       console.log(

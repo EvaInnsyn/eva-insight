@@ -11,6 +11,8 @@ export interface SidePanelToBackgroundSend {
   messages: ProxyMessage[];
   /** Client-assigned ID of the assistant placeholder to fill. */
   assistantMessageId: string;
+  /** Verkefnamappan sem verkið vistast í (valin í veljara spjaldsins). */
+  folder?: { id: string; name: string } | { skip: true };
 }
 
 /** Side panel → background: cancel the in-flight stream. */

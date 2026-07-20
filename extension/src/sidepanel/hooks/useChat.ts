@@ -4,7 +4,7 @@
  * and applies streamed deltas to the in-progress assistant message.
  */
 
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import {
   CHAT_PORT_NAME,
   type BackgroundToSidePanel,
@@ -339,9 +339,23 @@ export function useChat() {
         type: "chat/send",
         messages: proxyMessages,
         assistantMessageId: placeholder.id,
+        folder: folderRef.current ?? undefined,
       });
     },
     [ensurePort, state.messages, state.streaming],
+  );
+
+  // Verkefnamappa samtalsins, valin í veljaranum fyrir fyrsta skeytið.
+  const [folder, setFolderState] = useState<
+    { id: string; name: string } | { skip: true } | null
+  >(null);
+  const folderRef = useRef<{ id: string; name: string } | { skip: true } | null>(null);
+  const setFolder = useCallback(
+    (f: { id: string; name: string } | { skip: true } | null) => {
+      folderRef.current = f;
+      setFolderState(f);
+    },
+    [],
   );
 
   const abort = useCallback(() => {
@@ -352,6 +366,8 @@ export function useChat() {
 
   const clear = useCallback(() => {
     dispatch({ type: "clear" });
+    folderRef.current = null;
+    setFolderState(null);
     chrome.runtime
       .sendMessage({ type: "chat/persist", messages: [] })
       .catch(() => {});
@@ -382,6 +398,8 @@ export function useChat() {
     abort,
     clear,
     decideConfirm,
+    folder,
+    setFolder,
   };
 }
 

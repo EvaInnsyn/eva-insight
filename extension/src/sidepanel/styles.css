@@ -1179,3 +1179,93 @@ textarea {
 .eva-btn-primary:hover {
   filter: brightness(1.08);
 }
+
+/* ---------- Verkefnamappa-veljarinn ---------- */
+
+.eva-folder-picker {
+  flex: 0 0 auto;
+  padding: 10px 12px 4px;
+  border-top: 1px solid var(--eva-frame-dim);
+  background: var(--eva-bg);
+}
+
+.eva-folder-picker-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--eva-text);
+  margin-bottom: 7px;
+}
+
+.eva-folder-picker-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.eva-folder-picker-chips > button,
+.eva-folder-picker-new button {
+  border: 1px solid var(--eva-frame);
+  background: var(--eva-surface);
+  color: var(--eva-frame);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.eva-folder-picker-chips > button:hover,
+.eva-folder-picker-new button:hover {
+  background: var(--eva-frame);
+  color: var(--eva-text-on-red);
+}
+
+.eva-folder-picker-chips > button.skip {
+  border-color: var(--eva-text-faint);
+  color: var(--eva-text-dim);
+}
+
+.eva-folder-picker-chips > button.skip:hover {
+  background: var(--eva-bg-dim);
+  color: var(--eva-text);
+}
+
+.eva-folder-picker-new {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.eva-folder-picker-new input {
+  border: 1px solid var(--eva-frame);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  background: var(--eva-surface);
+  color: var(--eva-text);
+  outline: none;
+  width: 130px;
+}
+
+.eva-folder-picker-loading {
+  font-size: 12px;
+  color: var(--eva-text-dim);
+}
+
+.eva-folder-picked {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-top: 1px solid var(--eva-frame-dim);
+  background: var(--eva-bg);
+  font-size: 12px;
+  color: var(--eva-text-dim);
+}
+
+.eva-folder-picked .eva-link {
+  font-size: 11px;
+}

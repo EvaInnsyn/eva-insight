@@ -12,6 +12,8 @@ import { useSettings } from "./hooks/useSettings";
 import { useActiveTab } from "./hooks/useActiveTab";
 import { ChatList } from "./components/ChatList";
 import { Composer } from "./components/Composer";
+import { FolderPicker } from "./components/FolderPicker";
+import { usePlatformAuth } from "./hooks/usePlatformAuth";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { Settings } from "./components/Settings";
 
@@ -27,8 +29,11 @@ export function App() {
     abort,
     clear,
     decideConfirm,
+    folder,
+    setFolder,
   } = useChat();
   const { isConfigured, loaded: settingsLoaded } = useSettings();
+  const platform = usePlatformAuth();
   const activeTab = useActiveTab();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -106,6 +111,12 @@ export function App() {
       <main className="eva-main">
         <ChatList messages={messages} />
       </main>
+
+      <FolderPicker
+        value={folder}
+        onChange={setFolder}
+        visible={platform.status.connected && messages.length === 0}
+      />
 
       <Composer
         onSend={send}

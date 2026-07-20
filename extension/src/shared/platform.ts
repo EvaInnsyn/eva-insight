@@ -15,6 +15,10 @@ export const PLATFORM = {
   sessionIngestPath: "/api/extension/session",
   /** Returns proxy URL + token for authenticated users. */
   configPath: "/api/extension/config",
+  /** Möppulisti fyrir veljara viðbótarinnar. */
+  foldersPath: "/api/extension/folders",
+  /** Minni Evu úr einni möppu (síðustu lotur). */
+  folderMemoryPath: (id: string) => `/api/extension/folders/${id}/memory`,
   /** Supabase project URL (same project the platform uses). */
   supabaseUrl: "https://joqeipjawrlnscdvsgna.supabase.co",
   /** Supabase anon key — public by design; RLS enforces all access. */

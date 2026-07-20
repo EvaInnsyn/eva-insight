@@ -15,6 +15,8 @@ export interface SessionPayload {
   actions: SessionAction[];
   startedAt?: string;
   endedAt?: string;
+  /** Verkefnamappan (projects.id) sem lotan vistast í. */
+  projectId?: string;
   /**
    * Short overview for Lotur: what was needed and what got done. Built locally
    * from text we already have (no AI call) — the platform stores it directly
@@ -47,6 +49,7 @@ export async function pushSession(
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
+        project_id: payload.projectId,
         title: payload.title.slice(0, 200) || "Eva Innsýn session",
         // Platform caps actions at 500 and validates each shape.
         actions: payload.actions.slice(0, 500).map((a) => ({
