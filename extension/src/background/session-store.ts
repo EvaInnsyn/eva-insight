@@ -37,14 +37,26 @@ function stripImagePayload(output: string | undefined): string | undefined {
 
 function sanitize(messages: ChatMessage[]): ChatMessage[] {
   return messages.slice(-MAX_MESSAGES).map((m) => {
-    if (!m.toolCalls?.length) return m;
-    return {
-      ...m,
-      toolCalls: m.toolCalls.map((c) => ({
-        ...c,
-        output: stripImagePayload(c.output),
-      })),
-    };
+    let out = m;
+    if (m.toolCalls?.length) {
+      out = {
+        ...out,
+        toolCalls: m.toolCalls.map((c) => ({
+          ...c,
+          output: stripImagePayload(c.output),
+        })),
+      };
+    }
+    // PDF-viðhengi eru MB að stærð — geyma nafnið en sleppa gögnunum.
+    if (m.attachments?.some((a) => a.kind === "pdf" && a.base64.length > 0)) {
+      out = {
+        ...out,
+        attachments: m.attachments.map((a) =>
+          a.kind === "pdf" ? { ...a, base64: "" } : a,
+        ),
+      };
+    }
+    return out;
   });
 }
 

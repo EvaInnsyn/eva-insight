@@ -34,14 +34,22 @@ export interface ChatImage {
   base64: string;
 }
 
+/** Viðhengi: mynd, PDF (heilt document-blokk) eða texti úr skjali. */
+export type ChatAttachment =
+  | { kind: "image"; mime: string; base64: string }
+  | { kind: "pdf"; name: string; base64: string }
+  | { kind: "doc"; name: string; text: string };
+
 export interface ChatMessage {
   /** Stable client-side ID. */
   id: string;
   role: Role;
   /** Plain text content (model's natural-language reply). */
   text: string;
-  /** Images the user attached (vision input). */
+  /** Images the user attached (vision input, eldra snið). */
   images?: ChatImage[];
+  /** Viðhengi notandans: myndir, PDF, skjöl. */
+  attachments?: ChatAttachment[];
   /** Tool calls made during this assistant turn (Phase 4+). */
   toolCalls?: ChatToolCall[];
   /** ISO timestamp at message creation. */
@@ -93,16 +101,42 @@ export function toProxyMessages(history: ChatMessage[]): ProxyMessage[] {
 
     if (m.role === "user") {
       const imgs = m.images ?? [];
-      if (m.text.trim().length === 0 && imgs.length === 0) continue;
-      if (imgs.length > 0) {
-        // Anthropic guidance: images before the text that refers to them.
-        const blocks: unknown[] = imgs
-          .filter((im) => im.base64 && im.base64.length > 0)
-          .map((im) => ({
-            type: "image",
-            source: { type: "base64", media_type: im.mime, data: im.base64 },
-          }));
+      const atts = m.attachments ?? [];
+      if (m.text.trim().length === 0 && imgs.length === 0 && atts.length === 0) continue;
+      if (imgs.length > 0 || atts.length > 0) {
+        // Anthropic guidance: images/documents before the text that refers to them.
+        const blocks: unknown[] = [];
+        for (const im of imgs) {
+          if (im.base64 && im.base64.length > 0) {
+            blocks.push({
+              type: "image",
+              source: { type: "base64", media_type: im.mime, data: im.base64 },
+            });
+          }
+        }
+        for (const a of atts) {
+          if (a.kind === "image" && a.base64 && a.base64.length > 0) {
+            blocks.push({
+              type: "image",
+              source: { type: "base64", media_type: a.mime, data: a.base64 },
+            });
+          } else if (a.kind === "pdf") {
+            if (a.base64 && a.base64.length > 0) {
+              blocks.push({
+                type: "document",
+                source: { type: "base64", media_type: "application/pdf", data: a.base64 },
+                title: a.name,
+              });
+            } else {
+              // PDF-gögnin voru hreinsuð úr geymslu — halda samhenginu samt.
+              blocks.push({ type: "text", text: `[PDF-skjalið "${a.name}" fylgdi þessu skeyti]` });
+            }
+          } else if (a.kind === "doc") {
+            blocks.push({ type: "text", text: `[Skjal: ${a.name}]\n${a.text}` });
+          }
+        }
         if (m.text.trim().length > 0) blocks.push({ type: "text", text: m.text });
+        if (blocks.length === 0) continue;
         raw.push({ role: "user", content: blocks });
       } else {
         raw.push({ role: "user", content: m.text });

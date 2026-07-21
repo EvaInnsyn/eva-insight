@@ -1,19 +1,27 @@
 import { useRef, useState, type KeyboardEvent, type ClipboardEvent, type DragEvent } from "react";
-import type { ChatImage } from "@/shared/chat";
+import type { ChatAttachment } from "@/shared/chat";
+import {
+  pdfToAttachment,
+  docxToAttachment,
+  textFileToAttachment,
+  MAX_PDF_BYTES,
+} from "../lib/attachments";
 
 interface Props {
-  onSend: (text: string, images: ChatImage[]) => void;
+  onSend: (text: string, attachments: ChatAttachment[]) => void;
   onStop: () => void;
   streaming: boolean;
   disabled: boolean;
   disabledReason?: string;
 }
 
-const MAX_IMAGES = 4;
+const MAX_ATTACHMENTS = 4;
 const MAX_EDGE = 1280; // Anthropic reads best under ~1568px; keep well within.
 
+const ACCEPT = "image/*,.pdf,.docx,.txt,.md,.csv";
+
 /** Downscale + JPEG-compress a file into a lightweight base64 (no data prefix). */
-async function fileToChatImage(file: File): Promise<ChatImage | null> {
+async function fileToChatImage(file: File): Promise<ChatAttachment | null> {
   if (!file.type.startsWith("image/")) return null;
   const bitmap = await createImageBitmap(file).catch(() => null);
   if (!bitmap) return null;
@@ -36,7 +44,26 @@ async function fileToChatImage(file: File): Promise<ChatImage | null> {
   const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
   const base64 = dataUrl.split(",")[1] ?? "";
   if (!base64) return null;
-  return { mime: "image/jpeg", base64 };
+  return { kind: "image", mime: "image/jpeg", base64 };
+}
+
+/** Flokkar skrá í rétt viðhengi eftir tegund. */
+async function fileToAttachment(file: File): Promise<ChatAttachment | null> {
+  if (file.type.startsWith("image/")) return fileToChatImage(file);
+  const name = file.name.toLowerCase();
+  if (file.type === "application/pdf" || name.endsWith(".pdf")) {
+    return pdfToAttachment(file);
+  }
+  if (name.endsWith(".docx")) return docxToAttachment(file);
+  if (
+    file.type.startsWith("text/") ||
+    name.endsWith(".txt") ||
+    name.endsWith(".md") ||
+    name.endsWith(".csv")
+  ) {
+    return textFileToAttachment(file);
+  }
+  return null;
 }
 
 export function Composer({
@@ -47,28 +74,40 @@ export function Composer({
   disabledReason,
 }: Props) {
   const [value, setValue] = useState("");
-  const [images, setImages] = useState<ChatImage[]>([]);
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [attachNote, setAttachNote] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const addFiles = async (files: FileList | File[]) => {
-    const room = MAX_IMAGES - images.length;
+    const room = MAX_ATTACHMENTS - attachments.length;
     if (room <= 0) return;
-    const picked = Array.from(files).filter((f) => f.type.startsWith("image/")).slice(0, room);
-    const converted = (await Promise.all(picked.map(fileToChatImage))).filter(
-      (x): x is ChatImage => x !== null,
-    );
-    if (converted.length > 0) setImages((prev) => [...prev, ...converted]);
+    setAttachNote(null);
+    const picked = Array.from(files).slice(0, room);
+    const converted: ChatAttachment[] = [];
+    const failed: string[] = [];
+    for (const f of picked) {
+      const a = await fileToAttachment(f);
+      if (a) converted.push(a);
+      else failed.push(f.name);
+    }
+    if (converted.length > 0) setAttachments((prev) => [...prev, ...converted]);
+    if (failed.length > 0) {
+      setAttachNote(
+        `Gat ekki lesið: ${failed.join(", ")}. Studdar tegundir: myndir, PDF (að ${Math.round(MAX_PDF_BYTES / 1_000_000)}MB), Word (.docx) og textaskrár.`,
+      );
+    }
   };
 
   const submit = () => {
     if (disabled || streaming) return;
     const text = value.trim();
-    if (!text && images.length === 0) return;
-    onSend(text, images);
+    if (!text && attachments.length === 0) return;
+    onSend(text, attachments);
     setValue("");
-    setImages([]);
+    setAttachments([]);
+    setAttachNote(null);
     requestAnimationFrame(() => {
       if (textareaRef.current) textareaRef.current.style.height = "auto";
     });
@@ -102,7 +141,7 @@ export function Composer({
     t.style.height = `${Math.min(t.scrollHeight, 160)}px`;
   };
 
-  const canSend = !disabled && !streaming && (value.trim().length > 0 || images.length > 0);
+  const canSend = !disabled && !streaming && (value.trim().length > 0 || attachments.length > 0);
 
   return (
     <div
@@ -119,15 +158,22 @@ export function Composer({
         <div className="eva-composer-disabled-note">{disabledReason}</div>
       ) : null}
 
-      {images.length > 0 && (
+      {attachments.length > 0 && (
         <div className="eva-composer-thumbs">
-          {images.map((img, i) => (
-            <span key={i} className="eva-composer-thumb">
-              <img src={`data:${img.mime};base64,${img.base64}`} alt="" />
+          {attachments.map((a, i) => (
+            <span
+              key={i}
+              className={a.kind === "image" ? "eva-composer-thumb" : "eva-composer-file"}
+            >
+              {a.kind === "image" ? (
+                <img src={`data:${a.mime};base64,${a.base64}`} alt="" />
+              ) : (
+                <span className="eva-composer-file-name">📄 {a.name}</span>
+              )}
               <button
                 type="button"
-                aria-label="Fjarlægja mynd"
-                onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))}
+                aria-label="Fjarlægja viðhengi"
+                onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
               >
                 ×
               </button>
@@ -135,12 +181,13 @@ export function Composer({
           ))}
         </div>
       )}
+      {attachNote && <div className="eva-composer-disabled-note">{attachNote}</div>}
 
       <div className="eva-composer-row">
         <input
           ref={fileRef}
           type="file"
-          accept="image/*"
+          accept={ACCEPT}
           multiple
           hidden
           onChange={(e) => {
@@ -152,11 +199,11 @@ export function Composer({
           type="button"
           className="eva-btn eva-btn-attach"
           onClick={() => fileRef.current?.click()}
-          disabled={disabled || streaming || images.length >= MAX_IMAGES}
-          aria-label="Bæta við mynd"
-          title="Bæta við mynd"
+          disabled={disabled || streaming || attachments.length >= MAX_ATTACHMENTS}
+          aria-label="Bæta við mynd eða skjali"
+          title="Bæta við mynd eða skjali (PDF, Word, texti)"
         >
-          <ImageIcon />
+          <PlusIcon />
         </button>
         <textarea
           ref={textareaRef}
@@ -166,7 +213,7 @@ export function Composer({
               ? "Configure settings to start chatting"
               : streaming
                 ? "Streaming…"
-                : "Skrifaðu eða settu inn mynd…"
+                : "Skrifaðu, eða settu inn mynd eða skjal…"
           }
           value={value}
           onChange={(e) => setValue(e.target.value)}
@@ -201,12 +248,10 @@ export function Composer({
   );
 }
 
-function ImageIcon() {
+function PlusIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <circle cx="8.5" cy="8.5" r="1.5" />
-      <path d="M21 15l-5-5L5 21" />
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 5v14M5 12h14" />
     </svg>
   );
 }

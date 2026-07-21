@@ -15,7 +15,7 @@ import {
   toProxyMessages,
   type ChatMessage,
   type ChatToolCall,
-  type ChatImage,
+  type ChatAttachment,
 } from "@/shared/chat";
 
 export interface ConfirmRequest {
@@ -310,16 +310,16 @@ export function useChat() {
   }, []);
 
   const send = useCallback(
-    (text: string, images: ChatImage[] = []) => {
+    (text: string, attachments: ChatAttachment[] = []) => {
       const trimmed = text.trim();
-      if ((!trimmed && images.length === 0) || state.streaming) return;
+      if ((!trimmed && attachments.length === 0) || state.streaming) return;
 
       const now = new Date().toISOString();
       const userMessage: ChatMessage = {
         id: newId("u"),
         role: "user",
         text: trimmed,
-        ...(images.length > 0 ? { images } : {}),
+        ...(attachments.length > 0 ? { attachments } : {}),
         createdAt: now,
       };
       const placeholder: ChatMessage = {

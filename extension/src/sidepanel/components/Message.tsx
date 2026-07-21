@@ -28,18 +28,33 @@ export function Message({ message }: { message: ChatMessage }) {
   return (
     <div className={cls}>
       <div className="eva-msg-bubble" title={hoverTitle}>
-        {message.images && message.images.length > 0 ? (
-          <div className="eva-msg-images">
-            {message.images.map((img, i) => (
-              <img
-                key={i}
-                className="eva-msg-image"
-                src={`data:${img.mime};base64,${img.base64}`}
-                alt="Viðhengd mynd"
-              />
-            ))}
-          </div>
-        ) : null}
+        {(() => {
+          const legacy = (message.images ?? []).map((im) => ({
+            kind: "image" as const,
+            mime: im.mime,
+            base64: im.base64,
+          }));
+          const atts = [...legacy, ...(message.attachments ?? [])];
+          if (atts.length === 0) return null;
+          return (
+            <div className="eva-msg-images">
+              {atts.map((a, i) =>
+                a.kind === "image" ? (
+                  <img
+                    key={i}
+                    className="eva-msg-image"
+                    src={`data:${a.mime};base64,${a.base64}`}
+                    alt="Viðhengd mynd"
+                  />
+                ) : (
+                  <span key={i} className="eva-msg-file">
+                    📄 {a.name}
+                  </span>
+                ),
+              )}
+            </div>
+          );
+        })()}
         {hasCalls ? (
           <ActivityGroup calls={calls} streaming={message.streaming === true} />
         ) : null}
