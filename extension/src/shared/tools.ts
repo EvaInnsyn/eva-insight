@@ -250,7 +250,7 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
   {
     name: "save_to_folder",
     description:
-      "Save a file (image, PDF, document) from a WEB URL straight into one of the user's project folders (verkefnamöppur) on the Eva platform, via API, no browsing needed. Use when the user asks to put/save/upload something into a mappa, e.g. a logo from their website into 'tilraun'. Resolve the file's URL first (from the current page via read_page/find, or a known URL). NOT for uploading into arbitrary websites (that is upload_image). Cannot access files on the user's computer.",
+      "Save a file straight into one of the user's project folders (verkefnamöppur) on the Eva platform, via API, no browsing needed. TWO sources: (1) a file the user ATTACHED to the chat (image/PDF/doc via the + button): pass attachment (its name, number, or omit for the latest) and NO url. (2) a file on a WEB page: pass its http(s) url. Use whenever the user asks to put/save/upload something into a mappa. NOT for uploading into arbitrary websites (that is upload_image).",
     input_schema: {
       type: "object",
       properties: {
@@ -260,14 +260,18 @@ const CUSTOM_TOOLS: CustomToolSchema[] = [
         },
         url: {
           type: "string",
-          description: "http(s) URL of the file to save.",
+          description: "http(s) URL of a file on the web. Omit when saving an attached file.",
+        },
+        attachment: {
+          type: "string",
+          description: "Which attached file to save: its filename, its number (1 = newest), or omit together with url to save the newest attachment.",
         },
         filename: {
           type: "string",
           description: "Optional name for the saved file.",
         },
       },
-      required: ["folder", "url"],
+      required: ["folder"],
     },
   },
   {
@@ -499,7 +503,7 @@ Never try the same approach more than twice. The ladder: (1) keyboard shortcut, 
 [auto context] may name the task's project folder, chosen by the user before the run, plus recent work from it. Never ask which folder the work belongs in, the panel already handled that. If the folder's recent work clearly relates to the current request, offer ONCE in one short sentence to continue where it left off, then act on the user's answer.
 
 ## The user can send you images and documents
-The user can attach files to their message (the + button, paste, or drag): images you SEE directly; PDFs you READ directly page by page (they arrive as documents); Word/text files arrive as extracted text marked [Skjal: name]. Work with the content: describe, analyse, summarise, pull text/colors, write a caption or post from them, compare to the page you're on. To save an image that lives on a WEB PAGE into a project folder, use save_to_folder with the image's URL (attached files aren't on the web, so point the user to ⬆ Hlaða upp on the folder page for those).
+The user can attach files to their message (the + button, paste, or drag): images you SEE directly; PDFs you READ directly page by page (they arrive as documents); Word/text files arrive as extracted text marked [Skjal: name]. Work with the content: describe, analyse, summarise, pull text/colors, write a caption or post from them, compare to the page you're on. Attached files CAN be saved into a project folder: save_to_folder with attachment (name or number, or omit for the newest), no url needed. Files on web pages save via save_to_folder with their url.
 
 ## The Eva platform (app.evai.is) is YOURS, use the direct lane
 The user's own Eva platform (app.evai.is, Verkefnin mín, möppur, Lotur) is your home system. NEVER browse/click around it like a foreign website. To put a file into a project folder, use save_to_folder with the file's URL, one call, done. If the user is ON a platform page and asks something the tools cover, act via the tool immediately. Files on the user's COMPUTER are out of reach for you, say so in one sentence and point them to the ⬆ Hlaða upp button on the folder page, never wander looking for a way.

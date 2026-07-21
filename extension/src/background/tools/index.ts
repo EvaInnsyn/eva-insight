@@ -45,6 +45,98 @@ export function setToolAuthContext(
   authCtx = ctx;
 }
 
+// ── Viðhengi keyrslunnar ─────────────────────────────────────────────────────
+// Skrár sem notandinn hengdi við skeytin sín (myndir, PDF). save_to_folder
+// getur vistað þær beint í verkefnamöppu án þess að módelið endurtaki bætin.
+export interface RunAttachment {
+  name: string;
+  mime: string;
+  base64: string;
+}
+let runAttachments: RunAttachment[] = [];
+export function setRunAttachments(atts: RunAttachment[]): void {
+  runAttachments = atts;
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/** tenant_id notandans, lesið með hans eigin tóka (RLS leyfir eigin röð). */
+async function fetchTenantId(accessToken: string): Promise<string> {
+  const payload = accessToken.split(".")[1];
+  if (!payload) throw new Error("ógildur aðgangslykill");
+  const sub = (JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/"))) as { sub?: string }).sub;
+  if (!sub) throw new Error("aðgangslykill án notanda");
+  const res = await fetch(
+    `${PLATFORM.supabaseUrl}/rest/v1/users?id=eq.${sub}&select=organisation_id`,
+    {
+      headers: {
+        apikey: PLATFORM.supabaseAnonKey,
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+  if (!res.ok) throw new Error(`náði ekki notendaupplýsingum (HTTP ${res.status})`);
+  const rows = (await res.json()) as { organisation_id?: string }[];
+  const tenant = rows[0]?.organisation_id;
+  if (!tenant) throw new Error("notandinn er ekki tengdur fyrirtæki");
+  return tenant;
+}
+
+/** Hleður viðhengi beint í Supabase Storage + skráir í project_files (RLS gætir). */
+async function uploadAttachmentToFolder(
+  accessToken: string,
+  folderId: string,
+  att: RunAttachment,
+): Promise<{ name: string }> {
+  const tenant = await fetchTenantId(accessToken);
+  const safeName = att.name.replace(/[^\w.\-() ]+/g, "_").slice(0, 120) || "skra";
+  const path = `${tenant}/${folderId}/${crypto.randomUUID()}-${safeName}`;
+  const bytes = base64ToBytes(att.base64);
+
+  const up = await fetch(
+    `${PLATFORM.supabaseUrl}/storage/v1/object/project-files/${path}`,
+    {
+      method: "POST",
+      headers: {
+        apikey: PLATFORM.supabaseAnonKey,
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": att.mime || "application/octet-stream",
+      },
+      body: bytes as unknown as BodyInit,
+    },
+  );
+  if (!up.ok) {
+    throw new Error(`upphleðsla í geymslu mistókst (HTTP ${up.status})`);
+  }
+
+  const ins = await fetch(`${PLATFORM.supabaseUrl}/rest/v1/project_files`, {
+    method: "POST",
+    headers: {
+      apikey: PLATFORM.supabaseAnonKey,
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify({
+      tenant_id: tenant,
+      project_id: folderId,
+      name: att.name.slice(0, 200),
+      storage_path: path,
+      mime_type: att.mime || null,
+      size_bytes: bytes.length,
+    }),
+  });
+  if (!ins.ok) {
+    throw new Error(`gat ekki skráð skrána (HTTP ${ins.status})`);
+  }
+  return { name: att.name };
+}
+
 // ── Cross-origin frame search ────────────────────────────────────────────────
 // Wix's canvas and Word Online's editor live in cross-origin iframes that the
 // content script (top frame only) cannot see. We inject a self-contained
@@ -1526,10 +1618,8 @@ const HANDLERS: Record<string, ToolHandler> = {
    * Vista skrá af vefslóð beint í verkefnamöppu notandans á Eva-platforminum.
    * Beina leiðin: ekkert vafur, eitt API-kall.
    */
-  async save_to_folder({ folder, url, filename }: { folder: string; url: string; filename?: string }) {
+  async save_to_folder({ folder, url, attachment, filename }: { folder: string; url?: string; attachment?: string | number; filename?: string }) {
     requireString(folder, "folder");
-    requireString(url, "url");
-    if (!/^https?:\/\//i.test(url)) throw new Error("url must be http(s)");
     if (!authCtx?.accessToken) {
       throw new Error("notandinn er ekki tengdur Eva-platforminum (skrá inn í stillingum)");
     }
@@ -1553,6 +1643,44 @@ const HANDLERS: Record<string, ToolHandler> = {
       );
     }
 
+    // Leið 1: viðhengi notandans (mynd/PDF úr spjallinu) — beint í geymsluna.
+    if (attachment !== undefined || !url) {
+      if (runAttachments.length === 0) {
+        throw new Error(
+          "engin viðhengi í þessu samtali — biddu notandann að hengja skrána við skeytið (+ hnappurinn), eða gefðu url á skrá á vef",
+        );
+      }
+      let att: RunAttachment | undefined;
+      if (attachment === undefined || attachment === "latest") {
+        att = runAttachments[0];
+      } else if (typeof attachment === "number") {
+        att = runAttachments[attachment - 1];
+      } else {
+        const q = String(attachment).toLowerCase();
+        att =
+          runAttachments.find((a) => a.name.toLowerCase() === q) ??
+          runAttachments.find((a) => a.name.toLowerCase().includes(q)) ??
+          (/^\d+$/.test(q) ? runAttachments[Number(q) - 1] : undefined);
+      }
+      if (!att) {
+        throw new Error(
+          `fann ekki viðhengið "${attachment}" — til: ${runAttachments.map((a, i) => `${i + 1}. ${a.name}`).join(", ")}`,
+        );
+      }
+      if (!att.base64) {
+        throw new Error(
+          `viðhengið "${att.name}" er úr eldra samtali og gögnin ekki lengur tiltæk — biddu notandann að hengja það við aftur eða nota Hlaða upp á möppusíðunni`,
+        );
+      }
+      const saved = await uploadAttachmentToFolder(authCtx.accessToken, match.id, {
+        ...att,
+        name: filename ?? att.name,
+      });
+      return { saved: true, folder: match.name, file: saved.name };
+    }
+
+    // Leið 2: skrá á vef — platformurinn sækir hana sjálfur.
+    if (!/^https?:\/\//i.test(url)) throw new Error("url must be http(s)");
     const upRes = await fetch(`${PLATFORM.apiUrl}${PLATFORM.folderUploadPath(match.id)}`, {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },

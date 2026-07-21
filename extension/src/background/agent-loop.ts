@@ -7,7 +7,7 @@
  * hit MAX_TOOL_ROUNDS.
  */
 
-import { runTool, probeDisplayDims, releaseDebugger, setToolAuthContext } from "./tools";
+import { runTool, probeDisplayDims, releaseDebugger, setToolAuthContext, setRunAttachments } from "./tools";
 import {
   ProxyError,
   fetchMemory, runChat,
@@ -346,6 +346,33 @@ export async function runAgentLoop(
   // Deep find calls the proxy itself — give tools this run's auth.
   setToolAuthContext({ settings, accessToken: accessToken ?? null });
 
+  // Viðhengi keyrslunnar: myndir/PDF úr user-skeytunum (nýjast fremst) svo
+  // save_to_folder geti vistað þau beint í möppu án þess að módelið
+  // endurtaki bætin.
+  {
+    interface Harvested { name: string; mime: string; base64: string }
+    const atts: Harvested[] = [];
+    for (const msg of messages) {
+      if (msg.role !== "user" || !Array.isArray(msg.content)) continue;
+      const found: Harvested[] = [];
+      let imgN = 0;
+      for (const raw of msg.content as Array<Record<string, unknown>>) {
+        const type = raw?.type;
+        const src = raw?.source as { media_type?: string; data?: string } | undefined;
+        if (type === "image" && src?.data) {
+          imgN += 1;
+          const mime = src.media_type ?? "image/jpeg";
+          found.push({ name: `mynd-${imgN}.${mime.split("/")[1] ?? "jpg"}`, mime, base64: src.data });
+        } else if (type === "document") {
+          const title = typeof raw.title === "string" ? raw.title : "skjal.pdf";
+          found.push({ name: title, mime: src?.media_type ?? "application/pdf", base64: src?.data ?? "" });
+        }
+      }
+      atts.unshift(...found);
+    }
+    setRunAttachments(atts);
+  }
+
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (signal.aborted) break;
 
@@ -486,6 +513,7 @@ export async function runAgentLoop(
   // Drop the CDP session promptly so Chrome's debugger bar clears when Eva
   // finishes instead of lingering for the idle timeout.
   setToolAuthContext(null);
+  setRunAttachments([]);
   bindTaskTab(null);
   await releaseDebugger().catch(() => {});
 
