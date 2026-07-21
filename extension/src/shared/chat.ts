@@ -26,12 +26,22 @@ export interface ChatToolCall {
   finishedAt?: string;
 }
 
+/** An image the user attached to a message (vision input). */
+export interface ChatImage {
+  /** e.g. "image/jpeg", "image/png". */
+  mime: string;
+  /** Base64 (no data: prefix), already downscaled by the composer. */
+  base64: string;
+}
+
 export interface ChatMessage {
   /** Stable client-side ID. */
   id: string;
   role: Role;
   /** Plain text content (model's natural-language reply). */
   text: string;
+  /** Images the user attached (vision input). */
+  images?: ChatImage[];
   /** Tool calls made during this assistant turn (Phase 4+). */
   toolCalls?: ChatToolCall[];
   /** ISO timestamp at message creation. */
@@ -82,8 +92,21 @@ export function toProxyMessages(history: ChatMessage[]): ProxyMessage[] {
     if (m.error) continue;
 
     if (m.role === "user") {
-      if (m.text.trim().length === 0) continue;
-      raw.push({ role: "user", content: m.text });
+      const imgs = m.images ?? [];
+      if (m.text.trim().length === 0 && imgs.length === 0) continue;
+      if (imgs.length > 0) {
+        // Anthropic guidance: images before the text that refers to them.
+        const blocks: unknown[] = imgs
+          .filter((im) => im.base64 && im.base64.length > 0)
+          .map((im) => ({
+            type: "image",
+            source: { type: "base64", media_type: im.mime, data: im.base64 },
+          }));
+        if (m.text.trim().length > 0) blocks.push({ type: "text", text: m.text });
+        raw.push({ role: "user", content: blocks });
+      } else {
+        raw.push({ role: "user", content: m.text });
+      }
       continue;
     }
 

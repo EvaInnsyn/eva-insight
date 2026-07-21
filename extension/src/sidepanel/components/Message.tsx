@@ -28,6 +28,18 @@ export function Message({ message }: { message: ChatMessage }) {
   return (
     <div className={cls}>
       <div className="eva-msg-bubble" title={hoverTitle}>
+        {message.images && message.images.length > 0 ? (
+          <div className="eva-msg-images">
+            {message.images.map((img, i) => (
+              <img
+                key={i}
+                className="eva-msg-image"
+                src={`data:${img.mime};base64,${img.base64}`}
+                alt="Viðhengd mynd"
+              />
+            ))}
+          </div>
+        ) : null}
         {hasCalls ? (
           <ActivityGroup calls={calls} streaming={message.streaming === true} />
         ) : null}
