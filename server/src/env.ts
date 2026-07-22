@@ -21,6 +21,7 @@ const EVA_KEYS = [
   "EVA_INSIGHT_DB_PATH",
   "EVA_INSIGHT_ADMIN_PASSWORD",
   "SUPABASE_URL",
+  "SUPABASE_SERVICE_ROLE_KEY",
   "EVA_INTERNAL_EMAILS",
 ] as const;
 
@@ -62,6 +63,13 @@ const EnvSchema = z.object({
    * e.g. https://joqeipjawrlnscdvsgna.supabase.co
    */
   SUPABASE_URL: z.string().url().optional(),
+  /**
+   * Supabase service-role key. Optional: when set (alongside SUPABASE_URL) it
+   * enables the durable event bridge — mirroring proxy/extension events into
+   * the platform's Supabase `events` table for permanent analytics history.
+   * Absent → the bridge is a no-op and the proxy runs exactly as before.
+   */
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   /**
    * Innanhúss-aðgangar: comma-separated emails that never pay — no credit
    * checks, nothing deducted, usage goes straight to the Anthropic account

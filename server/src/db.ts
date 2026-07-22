@@ -33,6 +33,8 @@ export interface User {
   period_key: string;
   created_at: string;
   revoked_at: string | null;
+  /** Supabase auth id (public.users.id on the platform); null for legacy tok_ users. */
+  supabase_user_id: string | null;
 }
 
 let db: Database.Database | null = null;
