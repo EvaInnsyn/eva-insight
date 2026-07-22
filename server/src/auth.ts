@@ -16,10 +16,28 @@ import {
   rolloverIfNeeded,
   type User,
 } from "./db.js";
+import { loadEnv } from "./env.js";
 
 export interface AuthResult {
   user: User | null;
   devUnlimited: boolean;
+  /**
+   * Innanhúss-aðgangur (EVA_INTERNAL_EMAILS): skips every credit/cap check
+   * and is never charged — usage bills straight to the Anthropic console.
+   */
+  internal?: boolean;
+}
+
+/** Email is on the innanhúss list (EVA_INTERNAL_EMAILS, case-insensitive). */
+export function isInternalUser(user: User): boolean {
+  const raw = loadEnv().EVA_INTERNAL_EMAILS;
+  if (!raw) return false;
+  const email = user.name.trim().toLowerCase();
+  return raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+    .includes(email);
 }
 
 type AuthError = { error: { type: string; message: string; status: 401 | 402 | 429 } };
@@ -61,7 +79,16 @@ export async function authenticate(
   authHeader: string | undefined,
   sharedSecret: string,
   supabaseUrl?: string,
+  opts?: {
+    /**
+     * Skip the credit/cap block — for informational routes (/v1/me) that must
+     * keep answering when the balance is 0 so dashboards can say "engin
+     * inneign" instead of erroring. Spending routes never set this.
+     */
+    allowDepleted?: boolean;
+  },
 ): Promise<AuthResult | AuthError> {
+  const allowDepleted = opts?.allowDepleted === true;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return {
       error: {
@@ -88,17 +115,23 @@ export async function authenticate(
         };
       }
       const current = rolloverIfNeeded(user);
+      if (isInternalUser(current)) {
+        return { user: current, devUnlimited: false, internal: true };
+      }
       if (current.credit_balance_isk !== null) {
-        if (current.credit_balance_isk <= 0) {
+        if (current.credit_balance_isk <= 0 && !allowDepleted) {
+          const neverBought = (current.credit_granted_isk ?? 0) <= 0;
           return {
             error: {
               type: "credit_depleted",
-              message: "inneignin þín er uppurin — bættu við inneign á app.evai.is til að halda áfram",
+              message: neverBought
+                ? "engin inneign — kauptu inneign á app.evai.is til að byrja að nota Evu"
+                : "inneignin þín er uppurin — bættu við inneign á app.evai.is til að halda áfram",
               status: 402,
             },
           };
         }
-      } else if (overCap(current)) {
+      } else if (overCap(current) && !allowDepleted) {
         return {
           error: {
             type: "monthly_cap_reached",
@@ -134,17 +167,23 @@ export async function authenticate(
       };
     }
     const current = rolloverIfNeeded(user);
+    if (isInternalUser(current)) {
+      return { user: current, devUnlimited: false, internal: true };
+    }
     if (current.credit_balance_isk !== null) {
-      if (current.credit_balance_isk <= 0) {
+      if (current.credit_balance_isk <= 0 && !allowDepleted) {
+        const neverBought = (current.credit_granted_isk ?? 0) <= 0;
         return {
           error: {
             type: "credit_depleted",
-            message: "inneignin þín er uppurin — bættu við inneign á app.evai.is til að halda áfram",
+            message: neverBought
+              ? "engin inneign — kauptu inneign á app.evai.is til að byrja að nota Evu"
+              : "inneignin þín er uppurin — bættu við inneign á app.evai.is til að halda áfram",
             status: 402,
           },
         };
       }
-    } else if (overCap(current)) {
+    } else if (overCap(current) && !allowDepleted) {
       return {
         error: {
           type: "monthly_cap_reached",

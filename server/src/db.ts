@@ -17,6 +17,10 @@ import { PLANS, DEFAULT_PLAN, type PlanId } from "./plans.js";
 export interface User {
   /** Prepaid ISK balance; null = legacy monthly-cap user. */
   credit_balance_isk: number | null;
+  /** Lifetime sum of positive credit grants — the denominator for "% eftir". */
+  credit_granted_isk: number;
+  /** Verðþrep: fjolskylda / vinir / almennt (see tiers.ts). */
+  tier: string;
   id: string;
   name: string;
   token: string;
@@ -108,6 +112,18 @@ export function initDb(filepath = "data/eva.db"): Database.Database {
     CREATE INDEX IF NOT EXISTS credit_events_user_ts ON credit_events(user_id, ts);
   `);
 
+  // Verðþrep + purchase totals (2026-07-21). credit_granted_isk is the
+  // lifetime sum of positive grants — denominator for the "% eftir" display.
+  if (!uCols.some((c) => c.name === "credit_granted_isk")) {
+    db.exec(`ALTER TABLE users ADD COLUMN credit_granted_isk REAL NOT NULL DEFAULT 0;`);
+    // Backfill from the journal so % eftir is right for existing credit users.
+    db.exec(`UPDATE users SET credit_granted_isk = COALESCE(
+      (SELECT SUM(delta_isk) FROM credit_events WHERE user_id = users.id AND delta_isk > 0), 0);`);
+  }
+  if (!uCols.some((c) => c.name === "tier")) {
+    db.exec(`ALTER TABLE users ADD COLUMN tier TEXT NOT NULL DEFAULT 'almennt';`);
+  }
+
   // Eva's lasting memory per user — one compact note (business facts,
   // preferences, recurring sites) the extension injects into every run.
   // User-visible and editable in the side panel; content only, no history.
@@ -144,6 +160,10 @@ export function findUserBySupabaseId(supabaseUserId: string): User | undefined {
 /**
  * Returns the user for this Supabase ID, creating a record on first access.
  * This is the normal sign-in path for Eva platform users.
+ *
+ * New users start in CREDIT MODE WITH 0 BALANCE — no free quota, no plan
+ * shown, blocked from chat until their first Kling purchase lands. The plan
+ * column keeps its default label but /v1/me hides it until credit is granted.
  */
 export function findOrCreateUserBySupabaseId(
   supabaseUserId: string,
@@ -160,8 +180,8 @@ export function findOrCreateUserBySupabaseId(
   const defaultPlan = PLANS[DEFAULT_PLAN];
   getDb()
     .prepare(
-      `INSERT INTO users (id, name, token, supabase_user_id, plan, monthly_cap_input_tokens, monthly_cap_output_tokens, period_input_tokens, period_output_tokens, period_key, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)`,
+      `INSERT INTO users (id, name, token, supabase_user_id, plan, monthly_cap_input_tokens, monthly_cap_output_tokens, period_input_tokens, period_output_tokens, period_key, created_at, credit_balance_isk)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, 0)`,
     )
     .run(
       id,
@@ -269,6 +289,12 @@ export function setUserPlan(userId: string, planId: PlanId): User | undefined {
        WHERE id = ?`,
     )
     .run(plan.id, plan.monthlyCapInputTokens, plan.monthlyCapOutputTokens, userId);
+  return findUserById(userId);
+}
+
+/** Set the user's verðþrep (validated by the caller against tiers.ts). */
+export function setUserTier(userId: string, tier: string): User | undefined {
+  getDb().prepare("UPDATE users SET tier = ? WHERE id = ?").run(tier, userId);
   return findUserById(userId);
 }
 
@@ -409,6 +435,11 @@ export function grantCredit(userId: string, deltaIsk: number, reason: string): n
     db.prepare(
       "UPDATE users SET credit_balance_isk = COALESCE(credit_balance_isk, 0) + ? WHERE id = ?",
     ).run(deltaIsk, userId);
+    if (deltaIsk > 0) {
+      db.prepare(
+        "UPDATE users SET credit_granted_isk = credit_granted_isk + ? WHERE id = ?",
+      ).run(deltaIsk, userId);
+    }
     const row = db.prepare("SELECT credit_balance_isk AS b FROM users WHERE id = ?").get(userId) as { b: number } | undefined;
     const after = row?.b ?? 0;
     db.prepare(

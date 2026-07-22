@@ -18,6 +18,7 @@ import { getClient, withSystemCache, withToolsCache } from "../anthropic.js";
 import { authenticate, authErrorResponse } from "../auth.js";
 import { chargeCredit, recordUsage } from "../db.js";
 import { costIsk } from "../pricing.js";
+import { spendMultiplier } from "../tiers.js";
 
 const ChatRequestSchema = z.object({
   /** Override the server default; otherwise pinned to Opus 4.6. */
@@ -151,8 +152,14 @@ chatRoute.post("/", async (c) => {
         if (user && (inputTokens > 0 || outputTokens > 0)) {
           try {
             recordUsage(user.id, inputTokens, outputTokens, usageSource, model);
-            if (user.credit_balance_isk !== null) {
-              chargeCredit(user.id, costIsk(model, inputTokens, outputTokens), "notkun");
+            // Innanhúss users are never charged — usage bills straight to
+            // the Anthropic console (recordUsage above keeps admin stats).
+            if (user.credit_balance_isk !== null && !auth.internal) {
+              chargeCredit(
+                user.id,
+                costIsk(model, inputTokens, outputTokens, spendMultiplier(user.tier)),
+                "notkun",
+              );
             }
           } catch (e) {
             console.error("[eva-insight] failed to record usage", e);

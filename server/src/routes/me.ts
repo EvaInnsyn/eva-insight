@@ -19,6 +19,7 @@ meRoute.get("/", async (c) => {
     c.req.header("authorization") ?? undefined,
     env.EVA_INSIGHT_SHARED_SECRET,
     env.SUPABASE_URL,
+    { allowDepleted: true },
   );
   if ("error" in auth) return authErrorResponse(c, auth.error);
 
@@ -30,12 +31,28 @@ meRoute.get("/", async (c) => {
   }
 
   const u = auth.user!;
+  if (auth.internal) {
+    return c.json({
+      mode: "internal",
+      name: u.name,
+      plan: "umsja",
+    });
+  }
   if (u.credit_balance_isk !== null) {
+    // Dashboards show the FULL purchased amount + % remaining — the tier's
+    // burn rate is already applied at spend time, never in the display.
+    const purchased = Math.max(0, Math.round(u.credit_granted_isk ?? 0));
+    const balance = Math.max(0, Math.round(u.credit_balance_isk));
+    const percent =
+      purchased > 0 ? Math.min(100, Math.max(0, Math.round((balance / purchased) * 100))) : 0;
     return c.json({
       mode: "credit",
       name: u.name,
-      plan: u.plan ?? "innsyn",
-      balance_isk: Math.max(0, Math.round(u.credit_balance_isk)),
+      // No plan badge until the first purchase — a fresh account owns nothing.
+      plan: purchased > 0 ? (u.plan ?? "innsyn") : null,
+      balance_isk: balance,
+      purchased_isk: purchased,
+      percent_remaining: percent,
     });
   }
   return c.json({

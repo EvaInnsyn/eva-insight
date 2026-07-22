@@ -21,6 +21,7 @@ const EVA_KEYS = [
   "EVA_INSIGHT_DB_PATH",
   "EVA_INSIGHT_ADMIN_PASSWORD",
   "SUPABASE_URL",
+  "EVA_INTERNAL_EMAILS",
 ] as const;
 
 for (const key of EVA_KEYS) {
@@ -61,6 +62,12 @@ const EnvSchema = z.object({
    * e.g. https://joqeipjawrlnscdvsgna.supabase.co
    */
   SUPABASE_URL: z.string().url().optional(),
+  /**
+   * Innanhúss-aðgangar: comma-separated emails that never pay — no credit
+   * checks, nothing deducted, usage goes straight to the Anthropic account
+   * (still logged in usage_events for admin stats). Shown as UMSJÁ.
+   */
+  EVA_INTERNAL_EMAILS: z.string().default(""),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

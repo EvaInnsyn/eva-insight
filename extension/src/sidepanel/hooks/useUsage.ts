@@ -13,6 +13,10 @@ export type UsageInfo =
       plan?: string;
       name: string;
       balance_isk: number;
+      /** Full purchased amount in ISK — what the dashboard displays. */
+      purchased_isk?: number;
+      /** 0–100, share of the purchased credit still unused. */
+      percent_remaining?: number;
     }
   | {
       mode: "metered";
@@ -25,6 +29,12 @@ export type UsageInfo =
   | {
       mode: "dev_unlimited";
       message: string;
+    }
+  | {
+      /** Innanhúss-aðgangur — ekkert dregst af, notkun fer beint á console. */
+      mode: "internal";
+      plan?: string;
+      name: string;
     };
 
 interface State {

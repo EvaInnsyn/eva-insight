@@ -24,23 +24,49 @@ export function UsageBar({ info, error }: Props) {
     );
   }
 
+  if (info.mode === "internal") {
+    return (
+      <div className="eva-usage">
+        {info.plan && <div className="eva-usage-plan">{formatPlanName(info.plan)}</div>}
+        <div className="eva-usage-label">Inneign</div>
+        <div className="eva-usage-row">
+          <div className="eva-usage-pct eva-usage-pct-ok" style={{ fontSize: 15, fontWeight: 700 }}>
+            Ótakmarkað
+          </div>
+        </div>
+        <div className="eva-usage-detail">Innanhúss-aðgangur — ekkert dregst af</div>
+      </div>
+    );
+  }
+
   if (info.mode === "credit") {
-    const bal = info.balance_isk;
-    const stage = bal <= 500 ? "high" : bal <= 2000 ? "mid" : "ok";
     const planLabel = info.plan ? formatPlanName(info.plan) : null;
+    const purchased = info.purchased_isk ?? 0;
+    const pctLeft =
+      info.percent_remaining ??
+      (purchased > 0 ? Math.min(100, Math.round((info.balance_isk / purchased) * 100)) : 0);
+    const stage = pctLeft <= 10 ? "high" : pctLeft <= 30 ? "mid" : "ok";
     return (
       <div className="eva-usage">
         {planLabel && <div className="eva-usage-plan">{planLabel}</div>}
-        <div className="eva-usage-label">Inneign</div>
+        <div className="eva-usage-label">
+          Inneign{purchased > 0 ? ` · ${purchased.toLocaleString("is-IS")} kr` : ""}
+        </div>
         <div className="eva-usage-row">
-          <div className={`eva-usage-pct eva-usage-pct-${stage}`} style={{ fontSize: 15, fontWeight: 700 }}>
-            {Math.round(bal).toLocaleString("is-IS")} kr
+          <div className="eva-usage-bar">
+            <div
+              className={`eva-usage-bar-fill eva-usage-bar-fill-${stage}`}
+              style={{ width: `${pctLeft}%` }}
+            />
           </div>
+          <div className={`eva-usage-pct eva-usage-pct-${stage}`}>{pctLeft}%</div>
         </div>
         <div className="eva-usage-detail">
-          {bal <= 500
-            ? "Inneignin er að klárast, bættu við á app.evai.is"
-            : "Vinna Evu dregst af inneigninni þinni, hún fyrnist ekki"}
+          {purchased === 0
+            ? "Engin inneign ennþá — kauptu inneign á app.evai.is"
+            : pctLeft <= 10
+              ? "Inneignin er að klárast, bættu við á app.evai.is"
+              : "Vinna Evu dregst af inneigninni þinni, hún fyrnist ekki"}
         </div>
       </div>
     );

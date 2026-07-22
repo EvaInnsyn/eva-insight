@@ -1,10 +1,11 @@
 /**
  * Cost of Eva's work, in ISK — the currency of the credit system.
  *
- * costIsk = raw Anthropic cost (per-model $/1M tokens) × USD→ISK × markup.
- * Two Railway env knobs let Vigdís tune economics without a deploy:
- *   EVA_USD_ISK        — exchange rate (default 140)
- *   EVA_CREDIT_MARKUP  — multiplier on raw API cost (default 2.0)
+ * costIsk = raw Anthropic cost (per-model $/1M tokens) × USD→ISK × multiplier.
+ * The multiplier normally comes from the user's verðþrep (tiers.ts:
+ * fjölskylda 1/0.9, vinir 1/0.8, almennt 1/0.7); EVA_CREDIT_MARKUP remains
+ * only as the fallback when no tier is passed. EVA_USD_ISK (default 140)
+ * stays a Railway env knob so Vigdís can track the exchange rate.
  */
 
 /** $ per 1M tokens [input, output]. Unknown/legacy (null) rows use Sonnet. */
@@ -46,6 +47,7 @@ export function costIsk(
   model: string | null | undefined,
   inputTokens: number,
   outputTokens: number,
+  multiplier: number = creditMarkup(),
 ): number {
-  return costUsd(model, inputTokens, outputTokens) * usdIskRate() * creditMarkup();
+  return costUsd(model, inputTokens, outputTokens) * usdIskRate() * multiplier;
 }

@@ -28,6 +28,8 @@ import {
   type UserActivity,
 } from "../db.js";
 import { PLANS, type PlanId } from "../plans.js";
+import { TIERS, isTierId, type TierId } from "../tiers.js";
+import { setUserTier } from "../db.js";
 import { loadEnv } from "../env.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -161,13 +163,44 @@ function planButtons(u: User): string {
     .join(" ");
 }
 
+const TIER_COLORS: Record<TierId, string> = {
+  fjolskylda: "#1a7a4a",
+  vinir: "#be3519",
+  almennt: "#6b1a2e",
+};
+
+/** Verðþrep selector — one click sets the burn rate for all future usage. */
+function tierButtons(u: User): string {
+  const current = isTierId(u.tier) ? u.tier : "almennt";
+  return (Object.keys(TIERS) as TierId[])
+    .map((id) => {
+      const t = TIERS[id];
+      const active = current === id;
+      const pct = Math.round(t.usageShare * 100);
+      return `<form method="POST" action="/admin/users/${esc(u.id)}/tier" style="display:inline">
+        <input type="hidden" name="tier" value="${esc(id)}">
+        <button type="submit" title="${pct}% nýting — Eva heldur ${100 - pct}% af kaupum"
+          style="border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;
+          background:${active ? TIER_COLORS[id] : "#f0e8f5"};color:${active ? "white" : "#6b1a2e"}">
+          ${esc(t.label)} ${pct}%</button>
+      </form>`;
+    })
+    .join(" ");
+}
+
 /** Credit cell: balance, recent events, custom +/- adjustment form. */
 function creditCell(u: User): string {
   const bal = u.credit_balance_isk;
+  const granted = u.credit_granted_isk ?? 0;
+  const pctLeft =
+    bal !== null && granted > 0
+      ? Math.min(100, Math.max(0, Math.round((Math.max(0, bal) / granted) * 100)))
+      : null;
   const balHtml =
     bal === null
       ? `<span style="color:#bbb;font-size:12px">gamla kerfið (mánaðarþak)</span>`
-      : `<strong style="font-size:16px;color:${bal <= 500 ? "#c0392b" : "#1a7a4a"}">${Math.round(bal).toLocaleString()} kr</strong>`;
+      : `<strong style="font-size:16px;color:${bal <= 500 ? "#c0392b" : "#1a7a4a"}">${Math.round(bal).toLocaleString()} kr</strong>
+        ${pctLeft !== null ? `<span style="font-size:11px;color:#999"> · ${pctLeft}% eftir af ${Math.round(granted).toLocaleString()} kr</span>` : ""}`;
   const events = listCreditEvents(u.id, 3)
     .map(
       (e) =>
@@ -229,7 +262,9 @@ function rows(users: User[]): string {
       return `<tr>
       <td style="padding:14px 16px;font-weight:500">${esc(u.name)}</td>
       <td style="padding:14px 16px">${badge}</td>
-      <td style="padding:14px 16px">${planBadge(u.plan)}<div style="margin-top:6px">${planButtons(u)}</div></td>
+      <td style="padding:14px 16px">${planBadge(u.plan)}<div style="margin-top:6px">${planButtons(u)}</div>
+        <div style="margin-top:10px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#999;font-weight:600">Verðþrep</div>
+        <div style="margin-top:4px">${tierButtons(u)}</div></td>
       <td style="padding:14px 16px">${creditCell(u)}</td>
       <td style="padding:14px 16px">${activityCell(activity)}</td>
       <td style="padding:14px 16px">${bar(u.period_input_tokens, u.monthly_cap_input_tokens, "#6b1a2e")}</td>
@@ -452,6 +487,13 @@ adminRoute.post("/users/:id/plan", async (c) => {
     setUserPlan(id, plan as PlanId);
     grantCredit(id, PLANS[plan as PlanId].priceIsk, `admin:${plan}`);
   }
+  return c.redirect("/admin");
+});
+
+adminRoute.post("/users/:id/tier", async (c) => {
+  const body = await c.req.parseBody();
+  const tier = String(body.tier ?? "");
+  if (isTierId(tier)) setUserTier(c.req.param("id"), tier);
   return c.redirect("/admin");
 });
 
