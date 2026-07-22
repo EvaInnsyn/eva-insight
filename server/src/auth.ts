@@ -28,16 +28,23 @@ export interface AuthResult {
   internal?: boolean;
 }
 
-/** Email is on the innanhúss list (EVA_INTERNAL_EMAILS, case-insensitive). */
-export function isInternalUser(user: User): boolean {
+/** Is this email on the innanhúss list (EVA_INTERNAL_EMAILS, case-insensitive)? */
+export function isInternalEmail(email: string | null | undefined): boolean {
   const raw = loadEnv().EVA_INTERNAL_EMAILS;
-  if (!raw) return false;
-  const email = user.name.trim().toLowerCase();
+  if (!raw || !email) return false;
   return raw
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean)
-    .includes(email);
+    .includes(email.trim().toLowerCase());
+}
+
+/**
+ * User matches the innanhúss list via the stored name (legacy admin-created
+ * rows use a display name, so JWT-auth also checks the token's email claim).
+ */
+export function isInternalUser(user: User): boolean {
+  return isInternalEmail(user.name);
 }
 
 type AuthError = { error: { type: string; message: string; status: 401 | 402 | 429 } };
@@ -115,7 +122,9 @@ export async function authenticate(
         };
       }
       const current = rolloverIfNeeded(user);
-      if (isInternalUser(current)) {
+      // The JWT's email claim is authoritative — the stored name may be a
+      // legacy display name ("Vigdís") rather than the email.
+      if (isInternalUser(current) || isInternalEmail(claims.email)) {
         return { user: current, devUnlimited: false, internal: true };
       }
       if (current.credit_balance_isk !== null) {
