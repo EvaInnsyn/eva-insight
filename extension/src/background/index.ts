@@ -26,7 +26,9 @@ import {
   scrollActivePage,
   scrollActivePageTo,
   typeInActivePage,
+  getActiveTab,
 } from "./page-bridge";
+import { trackEvent, domainOf, newTaskId } from "./analytics";
 import {
   signIn as platformSignIn,
   signOut as platformSignOut,
@@ -217,6 +219,16 @@ async function startStream(
   const sessionActions: SessionAction[] = [];
   const sessionStartedAt = new Date().toISOString();
 
+  // Analytics: one task id ties this run's start/end events together; the
+  // domain lets the Command Center break tasks down by website (spec §13).
+  const taskId = newTaskId();
+  const domain = domainOf((await getActiveTab().catch(() => null))?.url);
+  trackEvent(settings.proxyUrl, accessToken, {
+    name: "task_started",
+    task_id: taskId,
+    properties: { domain },
+  });
+
   try {
     const { info, paused, messages: finalMessages } = await runAgentLoop({
       settings,
@@ -301,6 +313,11 @@ async function startStream(
       assistantMessageId,
       info,
     });
+    trackEvent(settings.proxyUrl, accessToken, {
+      name: "task_completed",
+      task_id: taskId,
+      properties: { domain, paused, tool_count: sessionActions.length },
+    });
     // Fire-and-forget: save this session's actions to the Eva Innsýn platform
     // (no-op if the user hasn't connected their account).
     void maybePushSession(
@@ -317,6 +334,11 @@ async function startStream(
         assistantMessageId,
         info: { stop_reason: "aborted" },
       });
+      trackEvent(settings.proxyUrl, accessToken, {
+        name: "user_took_over",
+        task_id: taskId,
+        properties: { domain },
+      });
       return;
     }
     const errorType =
@@ -332,6 +354,11 @@ async function startStream(
       assistantMessageId,
       errorType,
       message,
+    });
+    trackEvent(settings.proxyUrl, accessToken, {
+      name: "task_failed",
+      task_id: taskId,
+      properties: { domain, error_type: errorType },
     });
   } finally {
     stopKeepAlive();
