@@ -67,14 +67,11 @@ eventsRoute.post("/", async (c) => {
 
   // Bridge disabled or user not yet on the platform → accept and drop. The
   // client treats analytics as fire-and-forget; nothing depends on the write.
-  // `diag` names the drop reason so an authed caller can tell config problems
-  // (bridge off, key can't read/write) from genuine no-ops — no secrets in it.
   const supabaseUserId = user?.supabase_user_id ?? null;
-  if (!bridgeEnabled()) return c.json({ ok: true, written: 0, diag: "bridge_disabled" });
-  if (!supabaseUserId) return c.json({ ok: true, written: 0, diag: "no_supabase_user" });
+  if (!bridgeEnabled() || !supabaseUserId) return c.json({ ok: true, written: 0 });
 
   const tenantId = await resolveTenantId(supabaseUserId);
-  if (!tenantId) return c.json({ ok: true, written: 0, diag: "no_tenant" });
+  if (!tenantId) return c.json({ ok: true, written: 0 });
 
   const rows = parsed.data.events.map((e) => ({
     tenant_id: tenantId,
