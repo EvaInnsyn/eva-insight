@@ -3,11 +3,12 @@ import pkg from "./package.json" with { type: "json" };
 
 export default defineManifest({
   manifest_version: 3,
-  name: "Eva Innsýn",
+  // Plain "y" on purpose — store name must be typeable on foreign keyboards.
+  name: "Eva Innsyn",
   description: "Your digital employee. Switches from accountant to marketer to HR manager to programmer — instantly.",
   version: pkg.version,
   action: {
-    default_title: "Open Eva Innsýn",
+    default_title: "Open Eva Innsyn",
   },
   background: {
     service_worker: "src/background/index.ts",
