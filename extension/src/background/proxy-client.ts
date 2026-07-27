@@ -50,6 +50,8 @@ export interface RunChatArgs {
   signal: AbortSignal;
   onTextDelta: (text: string) => void;
   onToolUseStart?: (block: ToolUseBlock) => void;
+  /** Summarized thinking chunks, streamed live so the panel shows progress. */
+  onThinkingDelta?: (text: string) => void;
   /** Model override; defaults to EXTENSION_MODEL. */
   model?: string;
   /** Beta flags; defaults to the computer-use beta. Pass [] for plain calls. */
@@ -155,6 +157,7 @@ export async function runChat(args: RunChatArgs): Promise<RunChatResult> {
     signal,
     onTextDelta,
     onToolUseStart,
+    onThinkingDelta,
   } = args;
 
   // Prefer the live Supabase JWT; fall back to the dev shared secret.
@@ -173,6 +176,8 @@ export async function runChat(args: RunChatArgs): Promise<RunChatResult> {
       messages,
       tools,
       betas: args.betas ?? EVA_TOOL_BETAS,
+      // Sonnet 4.6 returns summarized thinking by default; `display` is an
+      // Opus 4.7+ knob and would 400 here. Keep plain adaptive.
       ...(args.thinking === "off" ? {} : { thinking: { type: "adaptive" } }),
       max_tokens: args.maxTokens ?? 32768,
     }),
@@ -243,7 +248,9 @@ export async function runChat(args: RunChatArgs): Promise<RunChatResult> {
           block.toolUseJsonBuf =
             (block.toolUseJsonBuf ?? "") + String(delta.partial_json ?? "");
         } else if (delta?.type === "thinking_delta" && block.type === "thinking") {
-          block.thinkingBuf = (block.thinkingBuf ?? "") + String(delta.thinking ?? "");
+          const chunk = String(delta.thinking ?? "");
+          block.thinkingBuf = (block.thinkingBuf ?? "") + chunk;
+          onThinkingDelta?.(chunk);
         } else if (delta?.type === "signature_delta" && block.type === "thinking") {
           block.signatureBuf = (block.signatureBuf ?? "") + String(delta.signature ?? "");
         }

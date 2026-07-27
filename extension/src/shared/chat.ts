@@ -52,6 +52,11 @@ export interface ChatMessage {
   attachments?: ChatAttachment[];
   /** Tool calls made during this assistant turn (Phase 4+). */
   toolCalls?: ChatToolCall[];
+  /**
+   * Live summarized thinking for the working indicator. Transient — shown
+   * while streaming, not part of the persisted transcript body.
+   */
+  liveThinking?: string;
   /** ISO timestamp at message creation. */
   createdAt: string;
   /** True while the assistant turn is still streaming in. */

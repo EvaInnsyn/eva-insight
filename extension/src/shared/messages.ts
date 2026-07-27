@@ -60,6 +60,13 @@ export interface BackgroundToSidePanelDelta {
   text: string;
 }
 
+/** Background → side panel: summarized thinking chunk (live progress). */
+export interface BackgroundToSidePanelThinking {
+  type: "chat/thinking";
+  assistantMessageId: string;
+  text: string;
+}
+
 /** Background → side panel: a tool call was issued by the model. */
 export interface BackgroundToSidePanelToolStart {
   type: "chat/toolStart";
@@ -108,6 +115,7 @@ export interface BackgroundToSidePanelConfirmRequest {
 export type BackgroundToSidePanel =
   | BackgroundToSidePanelHistory
   | BackgroundToSidePanelDelta
+  | BackgroundToSidePanelThinking
   | BackgroundToSidePanelToolStart
   | BackgroundToSidePanelToolEnd
   | BackgroundToSidePanelDone

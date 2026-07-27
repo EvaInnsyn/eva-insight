@@ -128,15 +128,30 @@ chatRoute.post("/", async (c) => {
 
       let inputTokens = 0;
       let outputTokens = 0;
+      // H4 — prompt-cache visibility. If cacheRead stays 0 across a
+      // multi-round task, the tools/system prefix is being invalidated
+      // (a silent tax that both slows AND costs). Logged once per request.
+      let cacheReadTokens = 0;
+      let cacheCreateTokens = 0;
 
       try {
         for await (const event of stream) {
           if (sse.aborted) break;
           // Track usage as it accumulates so we still meter on early abort
           if (event.type === "message_start") {
-            const usage = (event as { message?: { usage?: { input_tokens?: number } } })
-              .message?.usage;
+            const usage = (event as {
+              message?: {
+                usage?: {
+                  input_tokens?: number;
+                  cache_read_input_tokens?: number;
+                  cache_creation_input_tokens?: number;
+                };
+              };
+            }).message?.usage;
             inputTokens = usage?.input_tokens ?? inputTokens;
+            cacheReadTokens = usage?.cache_read_input_tokens ?? cacheReadTokens;
+            cacheCreateTokens =
+              usage?.cache_creation_input_tokens ?? cacheCreateTokens;
           } else if (event.type === "message_delta") {
             const usage = (event as { usage?: { output_tokens?: number } }).usage;
             if (typeof usage?.output_tokens === "number") {
@@ -149,6 +164,12 @@ chatRoute.post("/", async (c) => {
           });
         }
       } finally {
+        // One compact cache line per request. hit% = read / (read + fresh input).
+        const cacheable = cacheReadTokens + inputTokens;
+        const hitPct = cacheable > 0 ? Math.round((cacheReadTokens / cacheable) * 100) : 0;
+        console.log(
+          `[cache] model=${model} read=${cacheReadTokens} create=${cacheCreateTokens} freshIn=${inputTokens} out=${outputTokens} hit=${hitPct}%`,
+        );
         if (user && (inputTokens > 0 || outputTokens > 0)) {
           try {
             recordUsage(user.id, inputTokens, outputTokens, usageSource, model);

@@ -56,7 +56,11 @@ export function Message({ message }: { message: ChatMessage }) {
           );
         })()}
         {hasCalls ? (
-          <ActivityGroup calls={calls} streaming={message.streaming === true} />
+          <ActivityGroup
+            calls={calls}
+            streaming={message.streaming === true}
+            liveThinking={message.liveThinking}
+          />
         ) : null}
         {hasText ? (
           <div className="eva-msg-text">
@@ -66,7 +70,7 @@ export function Message({ message }: { message: ChatMessage }) {
             ) : null}
           </div>
         ) : message.streaming && !hasCalls ? (
-          <ThinkingEye />
+          <ThinkingEye label={message.liveThinking} />
         ) : null}
         {message.error ? <ErrorBlock raw={message.error} /> : null}
       </div>
@@ -98,9 +102,11 @@ function groupCalls(calls: { id: string; name: string; input?: unknown }[]) {
 function ActivityGroup({
   calls,
   streaming,
+  liveThinking,
 }: {
   calls: ChatToolCall[];
   streaming: boolean;
+  liveThinking?: string;
 }) {
   const [open, setOpen] = useState(false);
   const done = calls.filter((c) => c.finishedAt).length;
@@ -113,7 +119,7 @@ function ActivityGroup({
         {groupCalls(calls).map(({ call: c, count }) => (
           <ToolCall key={c.id} call={c as never} count={count} />
         ))}
-        <ThinkingEye />
+        <ThinkingEye label={liveThinking} />
       </div>
     );
   }

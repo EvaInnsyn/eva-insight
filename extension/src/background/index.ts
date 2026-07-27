@@ -244,6 +244,13 @@ async function startStream(
             text,
           });
         },
+        onThinking: (text) => {
+          safePost(port, {
+            type: "chat/thinking",
+            assistantMessageId,
+            text,
+          });
+        },
         onToolStart: (tu, startedAt) => {
           sessionActions.push({
             type: tu.name,

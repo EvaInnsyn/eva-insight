@@ -36,6 +36,7 @@ type Action =
   | { type: "hydrate"; messages: ChatMessage[] }
   | { type: "addUser"; userMessage: ChatMessage; placeholder: ChatMessage }
   | { type: "delta"; id: string; text: string }
+  | { type: "thinking"; id: string; text: string }
   | {
       type: "toolStart";
       id: string;
@@ -78,6 +79,18 @@ function reducer(state: State, action: Action): State {
         ),
       };
     }
+    case "thinking": {
+      // Keep only the last ~160 chars — the working indicator shows a
+      // single live line, not the whole reasoning trace.
+      return {
+        ...state,
+        messages: state.messages.map((m) =>
+          m.id === action.id
+            ? { ...m, liveThinking: ((m.liveThinking ?? "") + action.text).slice(-160) }
+            : m,
+        ),
+      };
+    }
     case "toolStart": {
       return {
         ...state,
@@ -115,7 +128,9 @@ function reducer(state: State, action: Action): State {
         ...state,
         streaming: false,
         messages: state.messages.map((m) =>
-          m.id === action.id ? { ...m, streaming: false } : m,
+          m.id === action.id
+            ? { ...m, streaming: false, liveThinking: undefined }
+            : m,
         ),
       };
     }
@@ -166,6 +181,9 @@ export function useChat() {
           break;
         case "chat/delta":
           dispatch({ type: "delta", id: raw.assistantMessageId, text: raw.text });
+          break;
+        case "chat/thinking":
+          dispatch({ type: "thinking", id: raw.assistantMessageId, text: raw.text });
           break;
         case "chat/toolStart":
           dispatch({
@@ -257,6 +275,9 @@ export function useChat() {
             id: raw.assistantMessageId,
             text: raw.text,
           });
+          break;
+        case "chat/thinking":
+          dispatch({ type: "thinking", id: raw.assistantMessageId, text: raw.text });
           break;
         case "chat/toolStart":
           dispatch({

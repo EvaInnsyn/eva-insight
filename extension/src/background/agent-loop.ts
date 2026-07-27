@@ -242,6 +242,8 @@ function pruneMessages(messages: ProxyMessage[]): ProxyMessage[] {
 
 export interface AgentCallbacks {
   onTextDelta: (text: string) => void;
+  /** Summarized thinking, streamed live for the working indicator. */
+  onThinking?: (text: string) => void;
   onToolStart: (block: ToolUseBlock, startedAt: string) => void;
   onToolEnd: (
     toolUseId: string,
@@ -389,6 +391,7 @@ export async function runAgentLoop(
       tools,
       signal,
       onTextDelta: () => {},
+      onThinkingDelta: (t) => callbacks.onThinking?.(t),
       onToolUseStart: (tu) => {
         callbacks.onToolStart(tu, new Date().toISOString());
       },
@@ -427,10 +430,40 @@ export async function runAgentLoop(
       // not blocking — needsConfirmation will fall back to prompting
     }
 
-    // Run each tool, asking confirmation when needed.
-    const toolResultBlocks: unknown[] = [];
+    // Run the round's tools. Results are collected by id, then the
+    // tool_result blocks are assembled in the ORIGINAL tool order so the
+    // transcript is byte-identical to sequential execution (keeps the
+    // prompt cache warm and the API happy).
+    const runResults = new Map<string, { output: string; isError: boolean }>();
+
+    // H1 — pure reads with NO side effects and NO confirmation can run
+    // concurrently. Only when 2+ appear in one round; a single read takes
+    // the normal sequential path, so behaviour is unchanged for the common
+    // case. Deliberately excludes read_console/read_network/screenshot —
+    // those share the CDP debugger and must not race.
+    const PARALLEL_SAFE = new Set([
+      "read_page", "find", "get_active_tab", "get_page_text", "tabs_list",
+    ]);
+    const parallelReads = result.toolUses.filter(
+      (tu) =>
+        PARALLEL_SAFE.has(tu.name) &&
+        !needsConfirmation(tu.name, tu.input, { activeOrigin, allowedDomains }),
+    );
+    if (parallelReads.length > 1 && !signal.aborted) {
+      await Promise.all(
+        parallelReads.map(async (tu) => {
+          const r = await runTool(tu.name, tu.input);
+          runResults.set(tu.id, { output: r.output, isError: r.isError });
+          callbacks.onToolEnd(tu.id, r.output, r.isError, new Date().toISOString());
+        }),
+      );
+    }
+
+    // Everything else — state changes, anything needing confirmation, and
+    // single reads — runs sequentially in order.
     for (const tu of result.toolUses) {
       if (signal.aborted) break;
+      if (runResults.has(tu.id)) continue; // already ran in the parallel batch
 
       const confirm = needsConfirmation(tu.name, tu.input, {
         activeOrigin,
@@ -469,13 +502,20 @@ export async function runAgentLoop(
         output = r.output;
         isError = r.isError;
       }
-      const finishedAt = new Date().toISOString();
-      callbacks.onToolEnd(tu.id, output, isError, finishedAt);
+      runResults.set(tu.id, { output, isError });
+      callbacks.onToolEnd(tu.id, output, isError, new Date().toISOString());
+    }
+
+    // Assemble in original order — every executed tool_use gets its result.
+    const toolResultBlocks: unknown[] = [];
+    for (const tu of result.toolUses) {
+      const r = runResults.get(tu.id);
+      if (!r) continue; // aborted before this one ran
       toolResultBlocks.push({
         type: "tool_result",
         tool_use_id: tu.id,
-        content: buildToolResultContent(output, isError),
-        ...(isError ? { is_error: true } : {}),
+        content: buildToolResultContent(r.output, r.isError),
+        ...(r.isError ? { is_error: true } : {}),
       });
     }
     // Over-verification guard: if Eva only observed this round (no state-

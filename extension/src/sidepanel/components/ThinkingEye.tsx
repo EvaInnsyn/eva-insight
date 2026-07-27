@@ -1,4 +1,12 @@
-export function ThinkingEye() {
+/**
+ * Working indicator. Shows a blinking eye plus a live status line. When Eva
+ * is thinking, `label` carries her latest summarized thought (S2), so the
+ * user sees real progress instead of a silent pause; otherwise it falls back
+ * to a calm "er að vinna…".
+ */
+export function ThinkingEye({ label }: { label?: string } = {}) {
+  const trimmed = (label ?? "").trim();
+  const isThought = trimmed.length > 0;
   return (
     <span className="eva-thinking-eye" role="status" aria-label="er að vinna">
       <svg
@@ -29,7 +37,13 @@ export function ThinkingEye() {
         />
         <circle className="eva-eye-pupil" cx="24" cy="15" r="3.5" fill="var(--eva-frame)" />
       </svg>
-      <span className="eva-thinking-label">er að vinna…</span>
+      <span
+        className={
+          isThought ? "eva-thinking-label eva-thinking-thought" : "eva-thinking-label"
+        }
+      >
+        {isThought ? `💭 ${trimmed}` : "er að vinna…"}
+      </span>
     </span>
   );
 }
