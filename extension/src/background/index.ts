@@ -230,11 +230,12 @@ async function startStream(
   });
 
   try {
-    const { info, paused, messages: finalMessages } = await runAgentLoop({
+    const runSegment = (initialMessages: ProxyMessage[]) =>
+      runAgentLoop({
       settings,
       accessToken,
       taskFolder,
-      initialMessages: messages,
+      initialMessages,
       signal: controller.signal,
       callbacks: {
         onTextDelta: (text) => {
@@ -303,10 +304,40 @@ async function startStream(
           "eva-insight/settings": { ...cur, allowedDomains: next },
         });
       },
-    });
-    // If Eva paused at the round cap, tell the user — and make the note aware
-    // of their monthly budget so they can decide before continuing burns it.
-    if (paused) {
+      });
+
+    // Sjálf-áframhald: Eva heldur áfram sjálf yfir hléið á meðan inneignin
+    // er í góðu lagi — verkið stöðvast ekki. Hún spyr aðeins ("haltu áfram")
+    // þegar (a) inneign er komin niður fyrir 20% eftir, eða (b) alger
+    // öryggisþak (3 lotur × 60 = 180 aðgerðir) er náð. Innanhúss-notendur
+    // (engin inneign í húfi) fá aldrei hlé fyrr en við öryggisþakið.
+    const MAX_RESUME_SEGMENTS = 3;
+    const LOW_BUDGET_SPENT = 0.8; // spent ≥ 80% → ≤ 20% eftir → spyrja
+    let info: Awaited<ReturnType<typeof runSegment>>["info"];
+    let finalMessages: ProxyMessage[] = messages;
+    let askToContinue = false;
+    let segMessages = messages;
+
+    for (let seg = 0; ; seg++) {
+      const r = await runSegment(segMessages);
+      info = r.info;
+      finalMessages = r.messages;
+      if (!r.paused || controller.signal.aborted) break;
+      if (seg + 1 >= MAX_RESUME_SEGMENTS) {
+        askToContinue = true;
+        break;
+      }
+      const bearer = accessToken ?? settings.sharedSecret;
+      const frac = await fetchUsageFraction(settings.proxyUrl, bearer);
+      if (frac != null && frac >= LOW_BUDGET_SPENT) {
+        askToContinue = true;
+        break;
+      }
+      // Budget healthy (or internal/unlimited → frac null): resume silently.
+      segMessages = finalMessages;
+    }
+
+    if (askToContinue) {
       const bearer = accessToken ?? settings.sharedSecret;
       const frac = await fetchUsageFraction(settings.proxyUrl, bearer);
       safePost(port, {
@@ -323,7 +354,7 @@ async function startStream(
     trackEvent(settings.proxyUrl, accessToken, {
       name: "task_completed",
       task_id: taskId,
-      properties: { domain, paused, tool_count: sessionActions.length },
+      properties: { domain, paused: askToContinue, tool_count: sessionActions.length },
     });
     // Fire-and-forget: save this session's actions to the Eva Innsýn platform
     // (no-op if the user hasn't connected their account).
@@ -331,7 +362,7 @@ async function startStream(
       messages,
       sessionActions,
       sessionStartedAt,
-      buildSessionSummary(finalMessages, paused, sessionActions.length),
+      buildSessionSummary(finalMessages, askToContinue, sessionActions.length),
       taskFolder?.id,
     );
   } catch (err) {
@@ -625,9 +656,14 @@ async function fetchUsageFraction(
       used?: { input_tokens?: number; output_tokens?: number };
     };
     if (data.mode === "credit") {
+      // Prefer percent_remaining — accurate for any package size. Returns
+      // the fraction SPENT (0 = untouched, 1 = empty).
+      const pctRem = (data as { percent_remaining?: number }).percent_remaining;
+      if (typeof pctRem === "number") {
+        return Math.max(0, Math.min(1, 1 - pctRem / 100));
+      }
       const bal = (data as { balance_isk?: number }).balance_isk;
       if (typeof bal !== "number") return null;
-      // Map remaining credit onto the same warn scale: <=1500 kr ≈ >70% used.
       if (bal <= 0) return 1;
       if (bal <= 1500) return Math.min(0.99, 1 - bal / 5000);
       return 0;
