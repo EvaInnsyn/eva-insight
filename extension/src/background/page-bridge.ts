@@ -76,9 +76,37 @@ export async function getActiveTab(): Promise<chrome.tabs.Tab> {
 
 let taskTabId: number | null = null;
 
+// A: mark the task tab with a red "Eva" tab group so the user always sees
+// which tab Eva owns (like Claude). `markedTabId` tracks the currently
+// marked tab so repeated getTaskTab calls don't re-group every tool call.
+let markedTabId: number | null = null;
+
+async function applyMark(tabId: number | null): Promise<void> {
+  if (markedTabId === tabId) return; // already in the right state
+  // Remove the old mark first.
+  if (markedTabId != null) {
+    try {
+      await chrome.tabs.ungroup([markedTabId]);
+    } catch {
+      /* tab may be gone — ignore */
+    }
+    markedTabId = null;
+  }
+  if (tabId == null) return;
+  try {
+    if (!chrome.tabGroups) return; // permission missing → skip silently
+    const groupId = await chrome.tabs.group({ tabIds: [tabId] });
+    await chrome.tabGroups.update(groupId, { color: "red", title: "Eva" });
+    markedTabId = tabId;
+  } catch {
+    /* grouping can fail (tab closed, cross-window, etc.) — never break a run */
+  }
+}
+
 /** Bind (or clear) the tab this agent run operates on. */
 export function bindTaskTab(tabId: number | null): void {
   taskTabId = tabId;
+  void applyMark(tabId);
 }
 
 export function boundTaskTabId(): number | null {
@@ -107,7 +135,10 @@ export async function getTaskTab(): Promise<chrome.tabs.Tab> {
     }
   }
   const tab = await getActiveTab();
-  if (tab.id !== undefined) taskTabId = tab.id;
+  if (tab.id !== undefined) {
+    taskTabId = tab.id;
+    void applyMark(tab.id); // keep the red marker on the tab Eva rebinds to
+  }
   return tab;
 }
 

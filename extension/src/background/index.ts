@@ -222,12 +222,27 @@ async function startStream(
   // Analytics: one task id ties this run's start/end events together; the
   // domain lets the Command Center break tasks down by website (spec §13).
   const taskId = newTaskId();
-  const domain = domainOf((await getActiveTab().catch(() => null))?.url);
+  const startTab = await getActiveTab().catch(() => null);
+  const domain = domainOf(startTab?.url);
   trackEvent(settings.proxyUrl, accessToken, {
     name: "task_started",
     task_id: taskId,
     properties: { domain },
   });
+
+  // B: pin the panel header to the tab Eva is working on, so switching tabs
+  // no longer makes her look like she "followed" you. Released on done/error.
+  if (startTab?.url) {
+    const dom = domain ?? "";
+    let title = startTab.title ?? dom;
+    try {
+      title = startTab.title ?? new URL(startTab.url).hostname;
+    } catch { /* keep fallback */ }
+    safePost(port, {
+      type: "chat/taskTab",
+      tab: { title, domain: dom, favIconUrl: startTab.favIconUrl },
+    });
+  }
 
   try {
     const runSegment = (initialMessages: ProxyMessage[]) =>
@@ -346,6 +361,7 @@ async function startStream(
         text: pauseNote(frac),
       });
     }
+    safePost(port, { type: "chat/taskTab", tab: null }); // release panel pin
     safePost(port, {
       type: "chat/done",
       assistantMessageId,
@@ -366,6 +382,7 @@ async function startStream(
       taskFolder?.id,
     );
   } catch (err) {
+    safePost(port, { type: "chat/taskTab", tab: null }); // release panel pin
     if (controller.signal.aborted) {
       safePost(port, {
         type: "chat/done",

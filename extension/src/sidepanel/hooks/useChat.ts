@@ -169,6 +169,12 @@ export function useChat() {
 
   const portRef = useRef<chrome.runtime.Port | null>(null);
 
+  // The tab Eva is working on this run (B). Pins the header so switching
+  // tabs doesn't make her look like she followed you. Null when idle.
+  const [taskTab, setTaskTab] = useState<
+    { title: string; domain: string; favIconUrl?: string } | null
+  >(null);
+
   // Establish + maintain the port connection.
   useEffect(() => {
     let port = chrome.runtime.connect({ name: CHAT_PORT_NAME });
@@ -184,6 +190,9 @@ export function useChat() {
           break;
         case "chat/thinking":
           dispatch({ type: "thinking", id: raw.assistantMessageId, text: raw.text });
+          break;
+        case "chat/taskTab":
+          setTaskTab(raw.tab);
           break;
         case "chat/toolStart":
           dispatch({
@@ -209,6 +218,7 @@ export function useChat() {
           break;
         case "chat/done":
           dispatch({ type: "done", id: raw.assistantMessageId });
+          setTaskTab(null);
           break;
         case "chat/error":
           dispatch({
@@ -216,6 +226,7 @@ export function useChat() {
             id: raw.assistantMessageId,
             message: raw.message,
           });
+          setTaskTab(null);
           break;
         case "chat/confirmRequest":
           dispatch({
@@ -279,6 +290,9 @@ export function useChat() {
         case "chat/thinking":
           dispatch({ type: "thinking", id: raw.assistantMessageId, text: raw.text });
           break;
+        case "chat/taskTab":
+          setTaskTab(raw.tab);
+          break;
         case "chat/toolStart":
           dispatch({
             type: "toolStart",
@@ -303,6 +317,7 @@ export function useChat() {
           break;
         case "chat/done":
           dispatch({ type: "done", id: raw.assistantMessageId });
+          setTaskTab(null);
           break;
         case "chat/error":
           dispatch({
@@ -310,6 +325,7 @@ export function useChat() {
             id: raw.assistantMessageId,
             message: raw.message,
           });
+          setTaskTab(null);
           break;
         case "chat/confirmRequest":
           dispatch({
@@ -423,6 +439,7 @@ export function useChat() {
     decideConfirm,
     folder,
     setFolder,
+    taskTab,
   };
 }
 

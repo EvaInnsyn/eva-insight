@@ -67,6 +67,16 @@ export interface BackgroundToSidePanelThinking {
   text: string;
 }
 
+/**
+ * Background → side panel: the tab Eva is working on for this run. Sent at
+ * run start so the panel can PIN to it (stop following the user's tab
+ * switches); `tab: null` at run end releases the pin.
+ */
+export interface BackgroundToSidePanelTaskTab {
+  type: "chat/taskTab";
+  tab: { title: string; domain: string; favIconUrl?: string } | null;
+}
+
 /** Background → side panel: a tool call was issued by the model. */
 export interface BackgroundToSidePanelToolStart {
   type: "chat/toolStart";
@@ -116,6 +126,7 @@ export type BackgroundToSidePanel =
   | BackgroundToSidePanelHistory
   | BackgroundToSidePanelDelta
   | BackgroundToSidePanelThinking
+  | BackgroundToSidePanelTaskTab
   | BackgroundToSidePanelToolStart
   | BackgroundToSidePanelToolEnd
   | BackgroundToSidePanelDone

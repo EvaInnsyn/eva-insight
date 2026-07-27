@@ -16,6 +16,7 @@ import {
 } from "./proxy-client";
 import type { EvaSettings } from "./settings";
 import type { ChatStopInfo } from "../shared/chat";
+import { speedConfig } from "../shared/speed";
 import {
   EVA_SYSTEM_PROMPT,
   buildEvaTools,
@@ -383,6 +384,7 @@ export async function runAgentLoop(
     // but never show it. Only a round that ENDS the turn flushes its text to
     // the panel, so the user sees action cards while Eva works and exactly
     // one message when she's done.
+    const speed = speedConfig(settings.speed);
     const result = await runChat({
       settings,
       accessToken,
@@ -390,6 +392,9 @@ export async function runAgentLoop(
       messages: pruneMessages(messages),
       tools,
       signal,
+      // Notandinn ræður hraða/gæðum: Haiku (hratt) / Sonnet / Opus (snjallt).
+      model: speed.model,
+      thinking: speed.thinking,
       onTextDelta: () => {},
       onThinkingDelta: (t) => callbacks.onThinking?.(t),
       onToolUseStart: (tu) => {

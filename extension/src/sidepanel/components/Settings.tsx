@@ -3,6 +3,7 @@ import { useUsage } from "../hooks/useUsage";
 import { usePlatformAuth } from "../hooks/usePlatformAuth";
 import { UsageBar } from "./UsageBar";
 import { useSettings, type Settings as SettingsT } from "../hooks/useSettings";
+import { SPEED_ORDER, SPEED_CONFIG, DEFAULT_SPEED } from "@/shared/speed";
 
 interface Props {
   open: boolean;
@@ -106,9 +107,14 @@ export function Settings({ open, onClose }: Props) {
       proxyUrl: draft.proxyUrl.trim(),
       sharedSecret: draft.sharedSecret.trim(),
       allowedDomains: draft.allowedDomains.filter((d) => d.trim().length > 0),
+      speed: settings.speed ?? DEFAULT_SPEED,
     });
     setSavedAt(Date.now());
   };
+
+  const speed = settings.speed ?? DEFAULT_SPEED;
+  const setSpeed = (next: (typeof SPEED_ORDER)[number]) =>
+    void save({ ...settings, speed: next });
 
   return (
     <div className="eva-settings">
@@ -125,6 +131,27 @@ export function Settings({ open, onClose }: Props) {
       </div>
 
       <div className="eva-settings-body">
+        {/* ── Vinnuhraði ── notandinn ræður hraða/gæðum/verði */}
+        <div className="eva-field">
+          <span className="eva-field-label">Vinnuhraði</span>
+          <div className="eva-speed" role="group" aria-label="Vinnuhraði">
+            {SPEED_ORDER.map((id) => (
+              <button
+                key={id}
+                type="button"
+                className={speed === id ? "eva-speed-opt active" : "eva-speed-opt"}
+                onClick={() => setSpeed(id)}
+                aria-pressed={speed === id}
+              >
+                {SPEED_CONFIG[id].label}
+              </button>
+            ))}
+          </div>
+          <span style={{ color: "#8a8378", fontSize: 11 }}>
+            {SPEED_CONFIG[speed].hint} · {SPEED_CONFIG[speed].costHint}
+          </span>
+        </div>
+
         {/* ── Eva account ── */}
         <div className="eva-field">
           <span className="eva-field-label">Eva account</span>

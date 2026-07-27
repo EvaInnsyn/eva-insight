@@ -43,6 +43,9 @@ export default defineManifest({
     "alarms",
     "webNavigation",
     "debugger",
+    // Merkja task-tab-inn með rauðum "Eva" tab-hópi svo notandinn sjái
+    // alltaf hvaða tab Eva á. Engin notanda-viðvörun fylgir þessari heimild.
+    "tabGroups",
   ],
   host_permissions: ["<all_urls>"],
   content_security_policy: {

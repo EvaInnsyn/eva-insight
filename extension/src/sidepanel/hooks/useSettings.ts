@@ -5,19 +5,22 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { DEFAULT_SPEED, type SpeedId } from "@/shared/speed";
 
 export interface Settings {
   proxyUrl: string;
   sharedSecret: string;
   allowedDomains: string[];
+  speed: SpeedId;
 }
 
 const KEY = "eva-insight/settings";
 
 const DEFAULTS: Settings = {
-  proxyUrl: "http://localhost:8787",
+  proxyUrl: "https://eva-insightserver-production.up.railway.app",
   sharedSecret: "",
   allowedDomains: [],
+  speed: DEFAULT_SPEED,
 };
 
 export function useSettings() {

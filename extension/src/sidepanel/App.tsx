@@ -31,10 +31,17 @@ export function App() {
     decideConfirm,
     folder,
     setFolder,
+    taskTab,
   } = useChat();
   const { isConfigured, loaded: settingsLoaded } = useSettings();
   const platform = usePlatformAuth();
-  const activeTab = useActiveTab();
+  const liveTab = useActiveTab();
+  // While Eva is working, pin the header to HER tab (taskTab) instead of
+  // following the user's tab switches. Idle → show the live active tab.
+  const pinned = streaming && taskTab != null;
+  const activeTab = pinned
+    ? { title: taskTab!.title, domain: taskTab!.domain, favIconUrl: taskTab!.favIconUrl, protected: false }
+    : liveTab;
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // First-run: auto-open settings exactly once if we boot up unconfigured.
@@ -83,7 +90,13 @@ export function App() {
       <Settings open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       {activeTab ? (
-        <div className={`eva-tab-strip ${activeTab.protected ? "eva-tab-strip-protected" : ""}`}>
+        <div
+          className={[
+            "eva-tab-strip",
+            activeTab.protected ? "eva-tab-strip-protected" : "",
+            pinned ? "eva-tab-strip-pinned" : "",
+          ].filter(Boolean).join(" ")}
+        >
           {activeTab.favIconUrl && !activeTab.protected ? (
             <img src={activeTab.favIconUrl} alt="" className="eva-tab-favicon" />
           ) : (
@@ -92,6 +105,7 @@ export function App() {
           <span className="eva-tab-title">
             {activeTab.protected ? "System page — Eva can't read this" : (activeTab.title || activeTab.domain)}
           </span>
+          {pinned ? <span className="eva-tab-pin">Eva vinnur hér</span> : null}
         </div>
       ) : null}
 

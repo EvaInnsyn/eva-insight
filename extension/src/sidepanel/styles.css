@@ -192,6 +192,62 @@ textarea {
   opacity: 0.6;
 }
 
+/* Pinned while Eva works: red rail on the left + red "Eva vinnur hér" chip,
+   echoing the red tab-group marker in the tab strip. */
+.eva-tab-strip-pinned {
+  border-left: 3px solid var(--eva-frame);
+  background: var(--eva-bg);
+}
+
+.eva-tab-pin {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--eva-frame);
+  color: var(--eva-text-on-red);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+/* ---------- Vinnuhraði (speed picker) ---------- */
+
+.eva-speed {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--eva-frame);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.eva-speed-opt {
+  flex: 1 1 0;
+  padding: 6px 8px;
+  border: none;
+  border-right: 1px solid var(--eva-frame-dim);
+  background: var(--eva-bg);
+  color: var(--eva-text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.eva-speed-opt:last-child {
+  border-right: none;
+}
+
+.eva-speed-opt:hover {
+  background: var(--eva-bg-dim);
+}
+
+.eva-speed-opt.active {
+  background: var(--eva-frame);
+  color: var(--eva-text-on-red);
+}
+
 .eva-tab-favicon {
   width: 13px;
   height: 13px;

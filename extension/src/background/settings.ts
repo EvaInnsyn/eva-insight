@@ -4,11 +4,15 @@
  * device-pair token.
  */
 
+import { DEFAULT_SPEED, type SpeedId } from "../shared/speed";
+
 export interface EvaSettings {
   proxyUrl: string;
   sharedSecret: string;
   /** Origins (https://example.com) pre-approved for navigate/tabs_create. */
   allowedDomains: string[];
+  /** Vinnuhraði: hradi (Haiku) / jafnvaegi (Sonnet) / gaedi (Opus). */
+  speed: SpeedId;
 }
 
 const KEY = "eva-insight/settings";
@@ -17,6 +21,7 @@ const DEFAULTS: EvaSettings = {
   proxyUrl: "https://eva-insightserver-production.up.railway.app",
   sharedSecret: "",
   allowedDomains: [],
+  speed: DEFAULT_SPEED,
 };
 
 export async function readSettings(): Promise<EvaSettings> {
