@@ -53,6 +53,37 @@ export function App() {
     if (!isConfigured) setSettingsOpen(true);
   }, [settingsLoaded, isConfigured]);
 
+  // Verkefni frá plattforminum (t.d. „settu Eva-merkið á vefinn"): sótt við
+  // ræsingu og um leið og background lætur vita. Möppuvalinu er sleppt,
+  // verkefnið á sér heimili á plattforminum sjálfum.
+  const consumingTask = useRef(false);
+  useEffect(() => {
+    const KEY = "eva:pendingPlatformTask";
+    const consume = async () => {
+      if (consumingTask.current || streaming) return;
+      const stored = await chrome.storage.local.get(KEY);
+      const task = stored[KEY] as { prompt?: string; createdAt?: number } | undefined;
+      if (!task?.prompt) return;
+      if (Date.now() - (task.createdAt ?? 0) > 10 * 60_000) {
+        await chrome.storage.local.remove(KEY);
+        return;
+      }
+      consumingTask.current = true;
+      await chrome.storage.local.remove(KEY);
+      setFolder({ skip: true });
+      send(task.prompt);
+      consumingTask.current = false;
+    };
+    void consume();
+    const listener = (m: unknown) => {
+      if ((m as { type?: string } | null)?.type === "platform/taskPending") {
+        void consume();
+      }
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    return () => chrome.runtime.onMessage.removeListener(listener);
+  }, [send, setFolder, streaming]);
+
   return (
     <div className="eva-shell">
       <header className="eva-header">

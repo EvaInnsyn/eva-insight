@@ -557,6 +557,34 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  // Verkefni frá plattforminum: geyma promptið, opna spjaldið og láta það
+  // vita. Spjaldið sækir verkefnið við ræsingu eða um leið og skeytið berst.
+  if (m.type === "platform/startTask") {
+    const prompt = (m as { prompt?: unknown }).prompt;
+    if (typeof prompt !== "string" || !prompt.trim()) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    chrome.storage.local
+      .set({
+        "eva:pendingPlatformTask": { prompt: prompt.slice(0, 4000), createdAt: Date.now() },
+      })
+      .then(() => {
+        const tabId = _sender.tab?.id;
+        if (typeof tabId === "number") {
+          // Krafan um user-gesture rofnar stundum á leiðinni — þá bíður
+          // verkefnið bara þar til notandinn opnar spjaldið sjálfur.
+          chrome.sidePanel.open({ tabId }).catch(() => {});
+        }
+        chrome.runtime
+          .sendMessage({ type: "platform/taskPending" })
+          .catch(() => {});
+        sendResponse({ ok: true });
+      })
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
   // Auto-connect: content script on app.evai.is relays the platform session.
   if (m.type === "platform/syncSession") {
     platformSyncSession(

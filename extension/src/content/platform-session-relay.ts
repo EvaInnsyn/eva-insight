@@ -58,3 +58,31 @@ setTimeout(tryRelay, 800);
 window.addEventListener("storage", (e) => {
   if (e.key === SUPABASE_KEY) tryRelay();
 });
+
+// --- Verkefni frá plattforminum -----------------------------------------
+// app.evai.is getur rétt Evu verkefni (t.d. „settu Eva-merkið á vefinn")
+// með window.postMessage. Við áframsendum í background, sem geymir það og
+// opnar hliðarspjaldið; ack-skeyti til baka segir síðunni að Eva sé með það.
+window.addEventListener("message", (e) => {
+  if (e.source !== window || e.origin !== window.location.origin) return;
+  const d = e.data as
+    | { source?: string; type?: string; prompt?: unknown }
+    | null;
+  if (!d || d.source !== "eva-platform" || d.type !== "eva_task") return;
+  if (typeof d.prompt !== "string" || !d.prompt.trim()) return;
+
+  chrome.runtime
+    .sendMessage({
+      type: "platform/startTask",
+      prompt: d.prompt.slice(0, 4000),
+    })
+    .then(() => {
+      window.postMessage(
+        { source: "eva-extension", type: "eva_task_ack" },
+        window.location.origin,
+      );
+    })
+    .catch(() => {
+      // Extension not awake — the page shows its own fallback.
+    });
+});
