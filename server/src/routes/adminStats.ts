@@ -14,6 +14,7 @@ import { Hono } from "hono";
 import { loadEnv } from "../env.js";
 import { listUsers, monthUsageByModel, getDb } from "../db.js";
 import { costUsd, usdIskRate } from "../pricing.js";
+import { isInternalUser } from "../auth.js";
 
 export const adminStatsRoute = new Hono();
 
@@ -87,5 +88,25 @@ adminStatsRoute.get("/", (c) => {
       outstandingIsk: Math.round(outstandingIsk),
     },
     tokens: { input: inputTokens, output: outputTokens },
+    // Per-notanda inneignarstaða fyrir lág-inneign viðvaranir stjórnstöðvarinnar.
+    usersDetail: active
+      .filter((u) => u.credit_balance_isk !== null)
+      .map((u) => {
+        const purchased = Math.max(0, Math.round(u.credit_granted_isk ?? 0));
+        const balance = Math.max(0, Math.round(u.credit_balance_isk ?? 0));
+        return {
+          supabaseUserId: u.supabase_user_id,
+          email: u.name,
+          plan: u.plan,
+          tier: u.tier,
+          purchasedIsk: purchased,
+          balanceIsk: balance,
+          percentRemaining:
+            purchased > 0
+              ? Math.min(100, Math.max(0, Math.round((balance / purchased) * 100)))
+              : 0,
+          internal: isInternalUser(u),
+        };
+      }),
   });
 });
