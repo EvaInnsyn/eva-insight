@@ -20,6 +20,7 @@ import {
   createUser,
   setUserPlan,
   grantCredit,
+  grantTrialByEmail,
   listCreditEvents,
   getDb,
   getUserActivity,
@@ -510,4 +511,40 @@ adminRoute.post("/users/:id/credit", async (c) => {
     );
   }
   return c.redirect("/admin");
+});
+
+// Grant a 30-day trial (1500 ISK) to a new user by email.
+adminRoute.post("/grant-trial", async (c) => {
+  const body = await c.req.parseBody();
+  const email = String(body.email ?? "").trim().toLowerCase();
+  if (!email || !email.includes("@")) {
+    return c.json({ ok: false, error: "Invalid email" }, 400);
+  }
+  const user = grantTrialByEmail(email);
+  return c.json({
+    ok: true,
+    userId: user.id,
+    email: user.name,
+    balance: user.credit_balance_isk,
+    expiresAt: user.trial_expires_at,
+  });
+});
+
+// List all trial users with their status.
+adminRoute.get("/list-trials", (c) => {
+  const users = listUsers();
+  const trials = users
+    .filter((u) => u.trial_expires_at)
+    .map((u) => ({
+      id: u.id,
+      email: u.name,
+      grantedAt: u.created_at,
+      expiresAt: u.trial_expires_at,
+      balance: u.credit_balance_isk,
+      status:
+        u.trial_expires_at && new Date(u.trial_expires_at).getTime() < Date.now()
+          ? "expired"
+          : "active",
+    }));
+  return c.json({ ok: true, trials });
 });

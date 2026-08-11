@@ -1,0 +1,48 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "eva-website",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "/Users/disa/eva-website", "run", "dev"],
+      "port": 56738,
+      "autoPort": true
+    },
+    {
+      "name": "eva-proxy",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "/Users/disa/EVA INNSÝN CODE/server", "run", "dev"],
+      "port": 8787
+    },
+    {
+      "name": "eva-platform",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "/Users/disa/eva-innsyn", "run", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "eva-platform-3005",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "/Users/disa/eva-innsyn", "run", "dev", "--", "-p", "3005"],
+      "port": 3005
+    },
+    {
+      "name": "demo-scratchpad",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4790", "-d", "/private/tmp/claude-501/-Users-disa-EVA-INNS-N-CODE/37adc7d7-700c-4ab3-93b3-43f4c8f9f0eb/scratchpad"],
+      "port": 4790
+    },
+    {
+      "name": "email-templates",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4789", "-d", "/Users/disa/eva-innsyn/supabase/templates"],
+      "port": 4789
+    },
+    {
+      "name": "sigga-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "/Users/disa/Sigga Kling app/web", "run", "dev", "--", "--port", "3737"],
+      "port": 3737
+    }
+  ]
+}

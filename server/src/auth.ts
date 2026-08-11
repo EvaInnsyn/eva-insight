@@ -128,6 +128,13 @@ export async function authenticate(
         return { user: current, devUnlimited: false, internal: true };
       }
       if (current.credit_balance_isk !== null) {
+        // Check if trial expired
+        if (
+          current.trial_expires_at &&
+          new Date(current.trial_expires_at).getTime() < Date.now()
+        ) {
+          current.credit_balance_isk = 0;
+        }
         if (current.credit_balance_isk <= 0 && !allowDepleted) {
           const neverBought = (current.credit_granted_isk ?? 0) <= 0;
           return {
@@ -180,6 +187,13 @@ export async function authenticate(
       return { user: current, devUnlimited: false, internal: true };
     }
     if (current.credit_balance_isk !== null) {
+      // Check if trial expired
+      if (
+        current.trial_expires_at &&
+        new Date(current.trial_expires_at).getTime() < Date.now()
+      ) {
+        current.credit_balance_isk = 0;
+      }
       if (current.credit_balance_isk <= 0 && !allowDepleted) {
         const neverBought = (current.credit_granted_isk ?? 0) <= 0;
         return {

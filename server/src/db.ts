@@ -35,6 +35,8 @@ export interface User {
   revoked_at: string | null;
   /** Supabase auth id (public.users.id on the platform); null for legacy tok_ users. */
   supabase_user_id: string | null;
+  /** ISO timestamp when trial expires; null = no trial or trial active forever. */
+  trial_expires_at: string | null;
 }
 
 let db: Database.Database | null = null;
@@ -124,6 +126,12 @@ export function initDb(filepath = "data/eva.db"): Database.Database {
   }
   if (!uCols.some((c) => c.name === "tier")) {
     db.exec(`ALTER TABLE users ADD COLUMN tier TEXT NOT NULL DEFAULT 'almennt';`);
+  }
+
+  // Trial expiration tracking (2026-08-11). ISO timestamp for when trial ends.
+  if (!uCols.some((c) => c.name === "trial_expires_at")) {
+    db.exec(`ALTER TABLE users ADD COLUMN trial_expires_at TEXT;`);
+    db.exec(`CREATE INDEX IF NOT EXISTS users_trial_expires_at_idx ON users(trial_expires_at);`);
   }
 
   // Eva's lasting memory per user — one compact note (business facts,
@@ -455,6 +463,49 @@ export function grantCredit(userId: string, deltaIsk: number, reason: string): n
 /** Burn credit for usage (delta stored negative). Balance may dip below 0 on the final request. */
 export function chargeCredit(userId: string, isk: number, reason: string): number {
   return grantCredit(userId, -Math.abs(isk), reason);
+}
+
+/**
+ * Grant a 1500 ISK trial to a user (by email), valid for 30 days.
+ * If user doesn't exist (by email in name field), creates them.
+ * Returns the user record with trial_expires_at set.
+ */
+export function grantTrialByEmail(email: string): User {
+  let user = getDb()
+    .prepare<[string], User>("SELECT * FROM users WHERE name = ?")
+    .get(email);
+
+  if (!user) {
+    // Create a new trial user without Supabase integration
+    const id = randomUUID();
+    const token = `tok_${randomBytes(24).toString("hex")}`;
+    const now = new Date().toISOString();
+    const periodKey = currentPeriodKey();
+    getDb()
+      .prepare(
+        `INSERT INTO users (id, name, token, plan, monthly_cap_input_tokens, monthly_cap_output_tokens, period_input_tokens, period_output_tokens, period_key, created_at, credit_balance_isk, supabase_user_id)
+         VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, 0, NULL)`,
+      )
+      .run(
+        id,
+        email,
+        token,
+        "innsyn",
+        25_000_000,
+        1_500_000,
+        periodKey,
+        now,
+      );
+    user = findUserById(id)!;
+  }
+
+  grantCredit(user.id, 1500, "trial:30days");
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 30);
+  getDb()
+    .prepare("UPDATE users SET trial_expires_at = ? WHERE id = ?")
+    .run(expiresAt.toISOString(), user.id);
+  return findUserById(user.id)!;
 }
 
 export interface CreditEvent {
