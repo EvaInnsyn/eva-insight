@@ -467,13 +467,16 @@ export function chargeCredit(userId: string, isk: number, reason: string): numbe
 
 /**
  * Grant a 1500 ISK trial to a user (by email), valid for 30 days.
- * If user doesn't exist (by email in name field), creates them.
+ * Works for both new users and existing users.
  * Returns the user record with trial_expires_at set.
  */
 export function grantTrialByEmail(email: string): User {
+  const cleanEmail = email.trim().toLowerCase();
+
+  // Try to find existing user by name (email field)
   let user = getDb()
-    .prepare<[string], User>("SELECT * FROM users WHERE name = ?")
-    .get(email);
+    .prepare<[string], User>("SELECT * FROM users WHERE LOWER(name) = ?")
+    .get(cleanEmail);
 
   if (!user) {
     // Create a new trial user without Supabase integration
@@ -488,7 +491,7 @@ export function grantTrialByEmail(email: string): User {
       )
       .run(
         id,
-        email,
+        cleanEmail,
         token,
         "innsyn",
         25_000_000,
