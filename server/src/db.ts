@@ -145,6 +145,52 @@ export function initDb(filepath = "data/eva.db"): Database.Database {
     );
   `);
 
+  // Inneignarlotur (2026-08-12, ný verðskrá): credit_balance_isk er áfram
+  // heildarstaðan sem allt birtingarlag les, en loturnar bera fyrningu og
+  // brennsluröð — innifalin mánaðarinneign fyrst, svo keypt elsta fyrst.
+  // Keypt inneign gildir 12 mánuði; innifalin rúllar mest einn mánuð (sér
+  // um sig í renewIncludedLot, engin expires_at).
+  const hadLots = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='credit_lots'")
+    .get();
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS credit_lots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('included', 'purchased', 'legacy')),
+      granted_isk REAL NOT NULL,
+      balance_isk REAL NOT NULL,
+      expires_at TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS credit_lots_user ON credit_lots(user_id);
+    CREATE INDEX IF NOT EXISTS credit_lots_expiry ON credit_lots(expires_at)
+      WHERE expires_at IS NOT NULL;
+  `);
+  if (!hadLots) {
+    // Backfill: núverandi jákvæðar stöður verða ein 'legacy' lota per notanda.
+    // Fyrning = síðustu kaup + 12 mán, þó ALDREI fyrr en 30 dögum frá deploy
+    // svo enginn missi inneign án lofaða 30-daga fyrirvarans.
+    db.exec(`
+      INSERT INTO credit_lots (user_id, kind, granted_isk, balance_isk, expires_at, created_at)
+      SELECT
+        u.id,
+        'legacy',
+        u.credit_balance_isk,
+        u.credit_balance_isk,
+        MAX(
+          datetime(COALESCE(
+            (SELECT MAX(ts) FROM credit_events e WHERE e.user_id = u.id AND e.delta_isk > 0),
+            datetime('now')
+          ), '+12 months'),
+          datetime('now', '+30 days')
+        ),
+        datetime('now')
+      FROM users u
+      WHERE u.credit_balance_isk IS NOT NULL AND u.credit_balance_isk > 0;
+    `);
+  }
+
   return db;
 }
 
@@ -460,9 +506,130 @@ export function grantCredit(userId: string, deltaIsk: number, reason: string): n
   return tx() as number;
 }
 
-/** Burn credit for usage (delta stored negative). Balance may dip below 0 on the final request. */
+/** Burn credit for usage (delta stored negative). Balance may dip below 0 on
+ *  the final request. Brennsluröð (2026-08-12): útrunnar lotur fyrnast fyrst,
+ *  svo brennur innifalin mánaðarinneign, þá keypt/legacy elsta fyrst. Lotur
+ *  botna á 0 — það sem eftir stendur dregst samt af heildarstöðunni (má enda
+ *  undir núlli á síðasta requesti, eins og áður). */
 export function chargeCredit(userId: string, isk: number, reason: string): number {
-  return grantCredit(userId, -Math.abs(isk), reason);
+  const db = getDb();
+  const amount = Math.abs(isk);
+  // Fyrst fyrning (leiðréttir líka heildarstöðuna), svo brennsla úr lotum.
+  expireLotsForUser(userId);
+  const tx = db.transaction(() => {
+    let rest = amount;
+    const lots = db
+      .prepare(
+        `SELECT id, balance_isk FROM credit_lots
+         WHERE user_id = ? AND balance_isk > 0
+         ORDER BY CASE kind WHEN 'included' THEN 0 ELSE 1 END, created_at ASC, id ASC`,
+      )
+      .all(userId) as { id: number; balance_isk: number }[];
+    for (const lot of lots) {
+      if (rest <= 0) break;
+      const take = Math.min(lot.balance_isk, rest);
+      db.prepare("UPDATE credit_lots SET balance_isk = balance_isk - ? WHERE id = ?").run(
+        take,
+        lot.id,
+      );
+      rest -= take;
+    }
+  });
+  tx();
+  return grantCredit(userId, -amount, reason);
+}
+
+export type LotKind = "included" | "purchased" | "legacy";
+
+/** Bæta við inneignarlotu (keypt inneign / pakki) og heildarstöðuna með. */
+export function grantLot(
+  userId: string,
+  kind: LotKind,
+  isk: number,
+  expiresAt: string | null,
+  reason: string,
+): number {
+  getDb()
+    .prepare(
+      `INSERT INTO credit_lots (user_id, kind, granted_isk, balance_isk, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+    )
+    .run(userId, kind, isk, isk, expiresAt);
+  return grantCredit(userId, isk, reason);
+}
+
+/**
+ * Mánaðarleg endurnýjun innifalinnar inneignar — rúllar mest EINN mánuð:
+ * ný innifalin staða = min(núverandi innifalin, mánaðarskammtur) + skammtur.
+ * Gamla innifalda lotan núllast og ein fersk kemur í staðinn; heildarstaðan
+ * leiðréttist um mismuninn (getur verið neikvæð leiðrétting ef ónotuð
+ * innifalin inneign fyrnist við rúlluna).
+ */
+export function renewIncludedLot(userId: string, monthlyIsk: number, reason: string): number {
+  const db = getDb();
+  const tx = db.transaction(() => {
+    const row = db
+      .prepare(
+        "SELECT COALESCE(SUM(balance_isk), 0) AS b FROM credit_lots WHERE user_id = ? AND kind = 'included'",
+      )
+      .get(userId) as { b: number };
+    const current = row.b;
+    const carried = Math.min(current, monthlyIsk);
+    const newIncluded = carried + monthlyIsk;
+    db.prepare("UPDATE credit_lots SET balance_isk = 0 WHERE user_id = ? AND kind = 'included'").run(
+      userId,
+    );
+    db.prepare(
+      `INSERT INTO credit_lots (user_id, kind, granted_isk, balance_isk, expires_at, created_at)
+       VALUES (?, 'included', ?, ?, NULL, datetime('now'))`,
+    ).run(userId, newIncluded, newIncluded);
+    return newIncluded - current; // delta á heildarstöðuna
+  });
+  const delta = tx() as number;
+  return grantCredit(userId, delta, reason);
+}
+
+/** Fyrna útrunnar lotur — innan færslu; skilar ISK sem féll niður. */
+function expireLotsForUserInTx(userId: string): number {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(balance_isk), 0) AS b FROM credit_lots
+       WHERE user_id = ? AND balance_isk > 0
+         AND expires_at IS NOT NULL AND expires_at <= datetime('now')`,
+    )
+    .get(userId) as { b: number };
+  if (row.b > 0) {
+    db.prepare(
+      `UPDATE credit_lots SET balance_isk = 0
+       WHERE user_id = ? AND balance_isk > 0
+         AND expires_at IS NOT NULL AND expires_at <= datetime('now')`,
+    ).run(userId);
+  }
+  return row.b;
+}
+
+/** Fyrna útrunnar lotur notanda og draga af heildarstöðunni. */
+export function expireLotsForUser(userId: string): number {
+  const forfeited = getDb().transaction(() => expireLotsForUserInTx(userId))() as number;
+  if (forfeited > 0) {
+    grantCredit(userId, -forfeited, "fyrning:12man");
+  }
+  return forfeited;
+}
+
+/** Næsta fyrning með stöðu > 0 — fyrir „rennur út eftir X daga" birtingu. */
+export function nextLotExpiry(
+  userId: string,
+): { expires_at: string; balance_isk: number } | null {
+  const row = getDb()
+    .prepare(
+      `SELECT expires_at, SUM(balance_isk) AS balance_isk FROM credit_lots
+       WHERE user_id = ? AND balance_isk > 0 AND expires_at IS NOT NULL
+       GROUP BY expires_at ORDER BY expires_at ASC LIMIT 1`,
+    )
+    .get(userId) as { expires_at: string; balance_isk: number } | undefined;
+  return row ?? null;
 }
 
 /**

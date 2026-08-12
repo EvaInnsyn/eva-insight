@@ -19,6 +19,7 @@ import { chatRoute } from "./routes/chat.js";
 import { meRoute } from "./routes/me.js";
 import { adminRoute } from "./routes/admin.js";
 import { planRoute } from "./routes/plan.js";
+import { creditRoute } from "./routes/credit.js";
 import { memoryRoute } from "./routes/memory.js";
 import { adminStatsRoute } from "./routes/adminStats.js";
 import { eventsRoute } from "./routes/events.js";
@@ -55,6 +56,7 @@ app.get("/healthz", (c) =>
 app.route("/v1/chat", chatRoute);
 app.route("/v1/me", meRoute);
 app.route("/v1/plan", planRoute);
+app.route("/v1/credit", creditRoute);
 app.route("/v1/memory", memoryRoute);
 app.route("/v1/admin-stats", adminStatsRoute);
 app.route("/v1/events", eventsRoute);

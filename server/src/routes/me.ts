@@ -9,7 +9,7 @@
 import { Hono } from "hono";
 import { loadEnv } from "../env.js";
 import { authenticate, authErrorResponse } from "../auth.js";
-import { periodResetsAt } from "../db.js";
+import { expireLotsForUser, findUserById, nextLotExpiry, periodResetsAt } from "../db.js";
 
 export const meRoute = new Hono();
 
@@ -30,21 +30,27 @@ meRoute.get("/", async (c) => {
     });
   }
 
-  const u = auth.user!;
+  let u = auth.user!;
   if (auth.internal) {
     return c.json({
       mode: "internal",
       name: u.name,
-      plan: "umsja",
+      plan: "yfirsyn",
     });
   }
   if (u.credit_balance_isk !== null) {
+    // Fyrna útrunnar lotur við lestur svo staðan sé alltaf rétt birt.
+    if (expireLotsForUser(u.id) > 0) {
+      u = findUserById(u.id) ?? u;
+    }
     // Dashboards show the FULL purchased amount + % remaining — the tier's
     // burn rate is already applied at spend time, never in the display.
     const purchased = Math.max(0, Math.round(u.credit_granted_isk ?? 0));
-    const balance = Math.max(0, Math.round(u.credit_balance_isk));
+    const balance = Math.max(0, Math.round(u.credit_balance_isk ?? 0));
     const percent =
       purchased > 0 ? Math.min(100, Math.max(0, Math.round((balance / purchased) * 100))) : 0;
+    // „Rennur út eftir X daga" — næsta fyrning keyptrar inneignar.
+    const expiry = nextLotExpiry(u.id);
     return c.json({
       mode: "credit",
       name: u.name,
@@ -53,6 +59,12 @@ meRoute.get("/", async (c) => {
       balance_isk: balance,
       purchased_isk: purchased,
       percent_remaining: percent,
+      ...(expiry
+        ? {
+            next_expiry_at: expiry.expires_at,
+            expiring_isk: Math.round(expiry.balance_isk),
+          }
+        : {}),
     });
   }
   return c.json({

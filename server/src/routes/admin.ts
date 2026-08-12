@@ -20,6 +20,8 @@ import {
   createUser,
   setUserPlan,
   grantCredit,
+  grantLot,
+  renewIncludedLot,
   grantTrialByEmail,
   listCreditEvents,
   getDb,
@@ -28,7 +30,7 @@ import {
   type User,
   type UserActivity,
 } from "../db.js";
-import { PLANS, type PlanId } from "../plans.js";
+import { PLANS, PURCHASABLE_PLANS, type PlanId } from "../plans.js";
 import { TIERS, isTierId, type TierId } from "../tiers.js";
 import { setUserTier } from "../db.js";
 import { loadEnv } from "../env.js";
@@ -146,22 +148,33 @@ function planBadge(plan: PlanId): string {
   return `<span style="display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;letter-spacing:.5px;background:${color}1a;color:${color}">${esc(p?.displayName ?? plan)}</span>`;
 }
 
+/** Keyptir inneignarpakkar (12 mán fyrning) — spegla „Kaupa inneign" á platforminum. */
+const CREDIT_PACKAGE_AMOUNTS = [10_000, 15_000, 25_000];
+
 function planButtons(u: User): string {
-  // Credit era: each click GRANTS the package's credit (repeat purchases add
-  // up) and stamps the plan label. Always enabled.
-  return (Object.keys(PLANS) as PlanId[])
-    .map((id) => {
-      const p = PLANS[id];
-      const active = u.plan === id;
-      return `<form method="POST" action="/admin/users/${esc(u.id)}/plan" style="display:inline">
-        <input type="hidden" name="plan" value="${esc(id)}">
-        <button type="submit" title="bætir ${esc(p.priceIsk.toLocaleString())} kr inneign við"
-          style="border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;
-          background:${active ? PLAN_COLORS[id] : "#f0e8f5"};color:${active ? "white" : "#6b1a2e"}">
-          +${esc(p.displayName)} ${esc(p.priceIsk.toLocaleString())}</button>
-      </form>`;
-    })
-    .join(" ");
+  // Ný verðskrá (2026-08-12): áskriftarhnappur endurnýjar INNIFALDU
+  // mánaðarinneignina (rúllar mest einn mánuð) og stimplar plan-merkið.
+  const subs = PURCHASABLE_PLANS.map((id) => {
+    const p = PLANS[id];
+    const active = u.plan === id;
+    return `<form method="POST" action="/admin/users/${esc(u.id)}/plan" style="display:inline">
+      <input type="hidden" name="plan" value="${esc(id)}">
+      <button type="submit" title="endurnýjar ${esc(p.includedMonthlyIsk.toLocaleString())} kr innifalda mánaðarinneign"
+        style="border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;
+        background:${active ? PLAN_COLORS[id] : "#f0e8f5"};color:${active ? "white" : "#6b1a2e"}">
+        ↻${esc(p.displayName)} +${esc(p.includedMonthlyIsk.toLocaleString())}</button>
+    </form>`;
+  });
+  const packs = CREDIT_PACKAGE_AMOUNTS.map(
+    (amount) => `<form method="POST" action="/admin/users/${esc(u.id)}/package" style="display:inline">
+      <input type="hidden" name="amount" value="${amount}">
+      <button type="submit" title="bætir ${esc(amount.toLocaleString())} kr keyptri inneign við (12 mán gildistími)"
+        style="border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;
+        background:#f0e8f5;color:#6b1a2e">
+        +${esc(amount.toLocaleString())}</button>
+    </form>`,
+  );
+  return [...subs, ...packs].join(" ");
 }
 
 const TIER_COLORS: Record<TierId, string> = {
@@ -479,14 +492,27 @@ adminRoute.post("/users/:id/cap", async (c) => {
   return c.redirect("/admin");
 });
 
-// One-click plan change — sets plan AND both token caps to the plan's values.
+// One-click subscription renewal — sets plan/caps and renews the INCLUDED
+// monthly credit (rolls at most one month), same as a confirmed payment.
 adminRoute.post("/users/:id/plan", async (c) => {
   const body = await c.req.parseBody();
   const plan = String(body.plan ?? "");
-  if (plan in PLANS) {
+  if (PURCHASABLE_PLANS.includes(plan as PlanId)) {
     const id = c.req.param("id");
     setUserPlan(id, plan as PlanId);
-    grantCredit(id, PLANS[plan as PlanId].priceIsk, `admin:${plan}`);
+    renewIncludedLot(id, PLANS[plan as PlanId].includedMonthlyIsk, `admin:askrift:${plan}`);
+  }
+  return c.redirect("/admin");
+});
+
+// One-click purchased credit package — 12-month expiry, mirrors /v1/credit.
+adminRoute.post("/users/:id/package", async (c) => {
+  const body = await c.req.parseBody();
+  const amount = Math.round(Number(body.amount ?? 0));
+  if (CREDIT_PACKAGE_AMOUNTS.includes(amount)) {
+    const expiry = new Date();
+    expiry.setMonth(expiry.getMonth() + 12);
+    grantLot(c.req.param("id"), "purchased", amount, expiry.toISOString(), `admin:inneign:${amount}`);
   }
   return c.redirect("/admin");
 });

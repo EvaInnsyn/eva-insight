@@ -1,5 +1,6 @@
 /**
- * Verðþrep — how much of a purchase becomes usable work (2026-07-21).
+ * Verðþrep — how much of a purchase becomes usable work (2026-07-21;
+ * almennt fært í 50% nýting 2026-08-12 með nýju verðskránni).
  *
  * The customer's dashboard always shows the FULL purchased amount; the tier
  * decides how fast it burns. usageShare is the slice of each purchased króna
@@ -7,10 +8,10 @@
  *
  *   fjölskylda — 90% nýting (Eva heldur 10% af kaupunum)
  *   vinir      — 80% nýting (Eva heldur 20%)
- *   almennt    — 70% nýting (Eva heldur 30%)
+ *   almennt    — 50% nýting (framlegð 50% — ný verðskrá 2026-08-12)
  *
- * Spending applies 1/usageShare as a multiplier on raw cost, so a 5.000 kr
- * purchase yields 4.500 / 4.000 / 3.500 kr of at-cost work respectively.
+ * Spending applies 1/usageShare as a multiplier on raw cost, so a 10.000 kr
+ * purchase yields 9.000 / 8.000 / 5.000 kr of at-cost work respectively.
  */
 
 export type TierId = "fjolskylda" | "vinir" | "almennt";
@@ -24,7 +25,7 @@ export interface Tier {
 export const TIERS: Record<TierId, Tier> = {
   fjolskylda: { id: "fjolskylda", label: "Fjölskylda", usageShare: 0.9 },
   vinir: { id: "vinir", label: "Vinir", usageShare: 0.8 },
-  almennt: { id: "almennt", label: "Almennt", usageShare: 0.7 },
+  almennt: { id: "almennt", label: "Almennt", usageShare: 0.5 },
 };
 
 export const DEFAULT_TIER: TierId = "almennt";

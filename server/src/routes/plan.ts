@@ -12,8 +12,8 @@
 
 import { Hono } from "hono";
 import { loadEnv } from "../env.js";
-import { findOrCreateUserBySupabaseId, grantCredit, setUserPlan } from "../db.js";
-import { PLANS, type PlanId } from "../plans.js";
+import { findOrCreateUserBySupabaseId, renewIncludedLot, setUserPlan } from "../db.js";
+import { PLANS, PURCHASABLE_PLANS, type PlanId } from "../plans.js";
 
 export const planRoute = new Hono();
 
@@ -49,12 +49,12 @@ planRoute.post("/", async (c) => {
       400,
     );
   }
-  if (!plan || !(plan in PLANS)) {
+  if (!plan || !PURCHASABLE_PLANS.includes(plan as PlanId)) {
     return c.json(
       {
         error: {
           type: "invalid_request_error",
-          message: `plan must be one of: ${Object.keys(PLANS).join(", ")}`,
+          message: `plan must be one of: ${PURCHASABLE_PLANS.join(", ")}`,
         },
       },
       400,
@@ -65,10 +65,15 @@ planRoute.post("/", async (c) => {
     supabase_user_id,
     typeof email === "string" && email ? email : supabase_user_id,
   );
-  // Credit era: a confirmed payment ADDS the package's credit. The plan
-  // label is kept for display; caps become irrelevant once credit is set.
+  // Ný verðskrá (2026-08-12): hver staðfest mánaðargreiðsla endurnýjar
+  // INNIFALDU inneignina (rúllar mest einn mánuð) — ekki fullt áskriftarverð.
+  // Keypt inneign („Kaupa inneign" pakkar) kemur um /v1/credit.
   setUserPlan(user.id, plan as PlanId);
-  const balance = grantCredit(user.id, PLANS[plan as PlanId].priceIsk, `kaup:${plan}`);
+  const balance = renewIncludedLot(
+    user.id,
+    PLANS[plan as PlanId].includedMonthlyIsk,
+    `askrift:${plan}`,
+  );
 
   return c.json({
     ok: true,
