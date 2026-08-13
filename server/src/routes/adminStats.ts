@@ -12,7 +12,10 @@
 
 import { Hono } from "hono";
 import { loadEnv } from "../env.js";
-import { listUsers, monthUsageByModel, getDb } from "../db.js";
+import { listUsers, monthUsageByModel, getDb,
+  getUserActivity,
+  monthUsageByModel as monthUsageForUser,
+} from "../db.js";
 import { costUsd, usdIskRate } from "../pricing.js";
 import { isInternalUser } from "../auth.js";
 
@@ -94,6 +97,17 @@ adminStatsRoute.get("/", (c) => {
       .map((u) => {
         const purchased = Math.max(0, Math.round(u.credit_granted_isk ?? 0));
         const balance = Math.max(0, Math.round(u.credit_balance_isk ?? 0));
+        // Tokens, raunkostnaður og virkni per notanda — það sem gamla
+        // admin-borðið sýndi og stjórnstöðin gat ekki.
+        const usage = monthUsageForUser(u.id);
+        const inTok = usage.reduce((t, r) => t + r.input_tokens, 0);
+        const outTok = usage.reduce((t, r) => t + r.output_tokens, 0);
+        const usd = usage.reduce(
+          (t, r) => t + costUsd(r.model, r.input_tokens, r.output_tokens),
+          0,
+        );
+        const act = getUserActivity(u.id);
+
         return {
           supabaseUserId: u.supabase_user_id,
           email: u.name,
@@ -106,6 +120,22 @@ adminStatsRoute.get("/", (c) => {
               ? Math.min(100, Math.max(0, Math.round((balance / purchased) * 100)))
               : 0,
           internal: isInternalUser(u),
+          trialExpiresAt: u.trial_expires_at ?? null,
+          revokedAt: u.revoked_at ?? null,
+          usage: {
+            inputTokens: inTok,
+            outputTokens: outTok,
+            costIskThisMonth: Math.round(usd * rate),
+          },
+          activity: {
+            lastActive: act.lastActive,
+            sessions7d: act.sessions7d,
+            sessions30d: act.sessions30d,
+            requests30d: act.requests30d,
+            avgSessionMin: act.avgSessionMin,
+            /** Hlutfall notkunar sem kom gegnum mælaborðið en ekki viðbótina. */
+            platformShare: act.platformShare,
+          },
         };
       }),
   });
