@@ -733,3 +733,29 @@ export function periodResetsAt(date = new Date()): string {
   );
   return next.toISOString();
 }
+
+export interface CreditEventWithUser extends CreditEvent {
+  email: string;
+  supabase_user_id: string | null;
+}
+
+/**
+ * Allar inneignarhreyfingar á kerfinu, nýjast fyrst, með netfangi notandans.
+ *
+ * Til fyrir stjórnstöð platformsins: hún þarf að geta svarað „keypti þessi
+ * viðskiptavinur inneign eða fékk hann hana gefins?" og svarið liggur í
+ * reason-strengnum hér (`kaup:` gegn `admin:`/`trial:`). Sú saga er hvergi til
+ * platform-megin.
+ */
+export function listAllCreditEvents(limit = 500): CreditEventWithUser[] {
+  return getDb()
+    .prepare(
+      `SELECT e.ts, e.delta_isk, e.balance_after, e.reason,
+              u.name AS email, u.supabase_user_id
+         FROM credit_events e
+         JOIN users u ON u.id = e.user_id
+        ORDER BY e.id DESC
+        LIMIT ?`,
+    )
+    .all(limit) as CreditEventWithUser[];
+}
