@@ -23,6 +23,7 @@ import { creditRoute } from "./routes/credit.js";
 import { memoryRoute } from "./routes/memory.js";
 import { adminStatsRoute } from "./routes/adminStats.js";
 import { creditHistoryRoute } from "./routes/creditHistory.js";
+import { accessRoute } from "./routes/access.js";
 import { eventsRoute } from "./routes/events.js";
 
 const env = loadEnv();
@@ -61,6 +62,7 @@ app.route("/v1/credit", creditRoute);
 app.route("/v1/memory", memoryRoute);
 app.route("/v1/admin-stats", adminStatsRoute);
 app.route("/v1/credit-history", creditHistoryRoute);
+app.route("/v1/access", accessRoute);
 app.route("/v1/events", eventsRoute);
 app.route("/admin", adminRoute);
 

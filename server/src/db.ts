@@ -324,6 +324,14 @@ export function revokeUser(userId: string): User | undefined {
     .get(userId);
 }
 
+/** Opnar aftur aðgang sem var stöðvaður. Stöðvun verður að vera afturkræf. */
+export function restoreUser(userId: string): User | undefined {
+  getDb().prepare("UPDATE users SET revoked_at = NULL WHERE id = ?").run(userId);
+  return getDb()
+    .prepare<[string], User>("SELECT * FROM users WHERE id = ?")
+    .get(userId);
+}
+
 export function findUserById(userId: string): User | undefined {
   return getDb()
     .prepare<[string], User>("SELECT * FROM users WHERE id = ?")
