@@ -16,7 +16,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { loadEnv } from "../env.js";
 import { getClient, withSystemCache, withToolsCache } from "../anthropic.js";
 import { authenticate, authErrorResponse } from "../auth.js";
-import { chargeCredit, recordUsage } from "../db.js";
+import { chargeCredit, recordUsage, cachePlatformBalance } from "../db.js";
+import { spendPlatformCredits, unifiedCreditsEnabled, resolveTenantId } from "../supabase.js";
 import { costIsk } from "../pricing.js";
 import { spendMultiplier } from "../tiers.js";
 
@@ -176,11 +177,32 @@ chatRoute.post("/", async (c) => {
             // Innanhúss users are never charged — usage bills straight to
             // the Anthropic console (recordUsage above keeps admin stats).
             if (user.credit_balance_isk !== null && !auth.internal) {
-              chargeCredit(
-                user.id,
-                costIsk(model, inputTokens, outputTokens, spendMultiplier(user.tier)),
-                "notkun",
+              const cost = costIsk(
+                model,
+                inputTokens,
+                outputTokens,
+                spendMultiplier(user.tier),
               );
+              // Sameiginlegi potturinn: gjaldfæra í platforminum þegar
+              // notandinn er tengdur honum, annars staðbundið eins og áður.
+              // ALDREI hvort tveggja — það væri tvírukkun.
+              let chargedOnPlatform = false;
+              if (unifiedCreditsEnabled() && user.supabase_user_id) {
+                // resolveTenantId er í minni eftir hliðið, svo þetta er eitt
+                // netkall — ekki tvö. Gjaldfærslan situr í finally eftir að
+                // straumnum lýkur og hvert kall þar er áhætta á týndri notkun.
+                const tenantId = await resolveTenantId(user.supabase_user_id);
+                if (tenantId) {
+                  const left = await spendPlatformCredits(tenantId, cost);
+                  if (left !== null) {
+                    cachePlatformBalance(user.id, Math.max(0, left));
+                    chargedOnPlatform = true;
+                  }
+                }
+              }
+              if (!chargedOnPlatform) {
+                chargeCredit(user.id, cost, "notkun");
+              }
             }
           } catch (e) {
             console.error("[eva-insight] failed to record usage", e);

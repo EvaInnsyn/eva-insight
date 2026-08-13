@@ -324,6 +324,19 @@ export function revokeUser(userId: string): User | undefined {
     .get(userId);
 }
 
+/**
+ * Skrifa stöðu úr platform-pottinum í SQLite sem SKYNDIMINNI.
+ *
+ * Þegar sameiginlegi potturinn er virkur er platformurinn sannleikurinn og
+ * þessi dálkur bara afrit — það heldur öllu núverandi hliði og admin-borði
+ * virku án þess að endurskrifa þau.
+ */
+export function cachePlatformBalance(userId: string, isk: number): void {
+  getDb()
+    .prepare("UPDATE users SET credit_balance_isk = ? WHERE id = ?")
+    .run(Math.round(isk), userId);
+}
+
 /** Opnar aftur aðgang sem var stöðvaður. Stöðvun verður að vera afturkræf. */
 export function restoreUser(userId: string): User | undefined {
   getDb().prepare("UPDATE users SET revoked_at = NULL WHERE id = ?").run(userId);

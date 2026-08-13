@@ -95,3 +95,95 @@ export async function insertEvents(rows: BridgeEventRow[]): Promise<number> {
     return 0;
   }
 }
+
+/**
+ * Sameiginlegi potturinn: platformurinn er sannleikurinn um inneign.
+ *
+ * Slökkt með EVA_UNIFIED_CREDITS=off — neyðarhemill sem virkar án útgáfu.
+ * Sjálfgefið kveikt þegar brúin er stillt, því annars situr peningurinn á
+ * tveimur stöðum og viðskiptavinur sem notar bara spjallið tæmir vitlausan pott.
+ */
+export function unifiedCreditsEnabled(): boolean {
+  if (process.env.EVA_UNIFIED_CREDITS === "off") return false;
+  return bridgeEnabled();
+}
+
+export interface PlatformCredit {
+  tenantId: string;
+  /** Innifalin mánaðarinneign + ófyrnd keypt inneign, í krónum. */
+  balanceIsk: number;
+}
+
+/**
+ * Staða viðskiptavinar í platform-pottinum, fundin út frá Supabase-auðkenni.
+ *
+ * Eitt kall, ekki tvö: tenant og staða koma saman svo hvert spjallkall bæti
+ * ekki við tveimur netferðum. Skilar null ef notandinn er ekki tengdur
+ * platforminum (gamlir tok_-notendur og prufu-notendur) — þá gildir
+ * SQLite-staðan áfram.
+ */
+export async function platformCreditFor(
+  supabaseUserId: string,
+): Promise<PlatformCredit | null> {
+  const c = creds();
+  if (!c) return null;
+  const tenantId = await resolveTenantId(supabaseUserId);
+  if (!tenantId) return null;
+
+  try {
+    const nowIso = new Date().toISOString();
+    const [orgRes, lotsRes] = await Promise.all([
+      fetch(
+        `${c.url}/rest/v1/organisations?id=eq.${tenantId}&select=credits_remaining,billing_org_id`,
+        { headers: { apikey: c.key, Authorization: `Bearer ${c.key}` } },
+      ),
+      fetch(
+        `${c.url}/rest/v1/credit_purchase_logs?tenant_id=eq.${tenantId}&expired=is.false&expires_at=gt.${nowIso}&balance_remaining=gt.0&select=balance_remaining`,
+        { headers: { apikey: c.key, Authorization: `Bearer ${c.key}` } },
+      ),
+    ]);
+    if (!orgRes.ok || !lotsRes.ok) return null;
+    const org = (await orgRes.json()) as { credits_remaining: number }[];
+    const lots = (await lotsRes.json()) as { balance_remaining: number }[];
+    if (!org[0]) return null;
+    const purchased = lots.reduce((s, l) => s + l.balance_remaining, 0);
+    return { tenantId, balanceIsk: (org[0].credits_remaining ?? 0) + purchased };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Gjaldfæra í platform-pottinum. Skilar nýrri stöðu, eða null ef kallið
+ * mistókst — þá gjaldfærir kallarinn staðbundið svo notkun tapist ekki.
+ *
+ * p_allow_partial: notkunin er þegar afstaðin þegar hér er komið, svo það er
+ * rangt að hafna henni. Betra að taka það sem til er og fara í mínus-núll en
+ * að veita vinnuna ókeypis.
+ */
+export async function spendPlatformCredits(
+  tenantId: string,
+  amountIsk: number,
+): Promise<number | null> {
+  const c = creds();
+  if (!c || amountIsk <= 0) return null;
+  try {
+    const res = await fetch(`${c.url}/rest/v1/rpc/spend_credits`, {
+      method: "POST",
+      headers: {
+        apikey: c.key,
+        Authorization: `Bearer ${c.key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        p_tenant: tenantId,
+        p_amount: Math.round(amountIsk),
+        p_allow_partial: true,
+      }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as number;
+  } catch {
+    return null;
+  }
+}

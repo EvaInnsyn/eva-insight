@@ -15,7 +15,9 @@ import {
   overCap,
   rolloverIfNeeded,
   type User,
+  cachePlatformBalance,
 } from "./db.js";
+import { platformCreditFor, unifiedCreditsEnabled } from "./supabase.js";
 import { loadEnv } from "./env.js";
 
 export interface AuthResult {
@@ -122,6 +124,7 @@ export async function authenticate(
         };
       }
       const current = rolloverIfNeeded(user);
+      await refreshFromPlatform(current);
       // The JWT's email claim is authoritative — the stored name may be a
       // legacy display name ("Vigdís") rather than the email.
       if (isInternalUser(current) || isInternalEmail(claims.email)) {
@@ -183,6 +186,7 @@ export async function authenticate(
       };
     }
     const current = rolloverIfNeeded(user);
+    await refreshFromPlatform(current);
     if (isInternalUser(current)) {
       return { user: current, devUnlimited: false, internal: true };
     }
@@ -240,4 +244,22 @@ export function authErrorResponse(
     { error: { type: err.type, message: err.message } },
     err.status,
   );
+}
+
+/**
+ * Sækja stöðu úr platform-pottinum og skrifa hana í SQLite áður en hliðið
+ * les hana. Þannig verður platformurinn sannleikurinn án þess að hliðinu
+ * sjálfu sé breytt.
+ *
+ * Þögult no-op þegar notandinn er ekki tengdur platforminum, þegar brúin er
+ * slökkt eða þegar kallið mistekst — þá gildir SQLite-staðan áfram og
+ * þjónustan heldur velli.
+ */
+async function refreshFromPlatform(user: User): Promise<void> {
+  if (!unifiedCreditsEnabled()) return;
+  if (!user.supabase_user_id || user.credit_balance_isk === null) return;
+  const credit = await platformCreditFor(user.supabase_user_id);
+  if (!credit) return;
+  user.credit_balance_isk = credit.balanceIsk;
+  cachePlatformBalance(user.id, credit.balanceIsk);
 }
