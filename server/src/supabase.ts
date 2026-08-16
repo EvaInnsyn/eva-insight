@@ -177,7 +177,11 @@ export async function spendPlatformCredits(
       },
       body: JSON.stringify({
         p_tenant: tenantId,
-        p_amount: Math.round(amountIsk),
+        // Óafrúnnað frá 15. ágúst 2026. Math.round hér þýddi að spjallkall
+        // undir 0,5 kr rukkaðist sem NÚLL — hin hliðin á sömu skekkju og
+        // platformurinn hafði, þar sem ódýrt kall var ofrukkað upp í 1 kr.
+        // spend_credits tekur numeric frá 20260815000003_fractional_credits.
+        p_amount: amountIsk,
         p_allow_partial: true,
       }),
     });
