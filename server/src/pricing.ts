@@ -3,9 +3,14 @@
  *
  * costIsk = raw Anthropic cost (per-model $/1M tokens) × USD→ISK × multiplier.
  * The multiplier normally comes from the user's verðþrep (tiers.ts:
- * fjölskylda 1/0.9, vinir 1/0.8, almennt 1/0.7); EVA_CREDIT_MARKUP remains
- * only as the fallback when no tier is passed. EVA_USD_ISK (default 140)
- * stays a Railway env knob so Vigdís can track the exchange rate.
+ * fjölskylda 1/0.9, vinir 1/0.8, almennt 1/0.5 frá 12. ágúst 2026 — almennt
+ * var 1/0.7 fram að nýju verðskránni og þessi athugasemd sagði það áfram
+ * fram í 15. ágúst); EVA_CREDIT_MARKUP remains only as the fallback when no
+ * tier is passed. EVA_USD_ISK (default 140) stays a Railway env knob so
+ * Vigdís can track the exchange rate.
+ *
+ * TIERS.ts er sannleikurinn um framlegðina, ekki þessi athugasemd. Ef þau
+ * stangast á, trúðu tiers.ts.
  */
 
 /** $ per 1M tokens [input, output]. Unknown/legacy (null) rows use Sonnet. */
