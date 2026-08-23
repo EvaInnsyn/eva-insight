@@ -11,6 +11,12 @@ eða skrifar línu af kóða — sérstaklega `01-arkitektur.md` (hvert AI-köll
 og `02-gildrur.md`. Skráðu hverja breytingu strax í `04-breytingaskra.md`, líka
 þær sem þú gerir hérna megin.
 
+Tölur (verð, þrep, módelverð, álag) eru í `05-verd-og-kostnadur.md`; hvar hver
+staðreynd býr og hvað speglar hvað í `06-handrit.md`. **Frumrit verðþrepa og
+módelverða er HÉR** (`server/src/tiers.ts`, `server/src/pricing.ts`) —
+platformurinn speglar. Breytirðu þeim, keyrðu
+`bash /Users/disa/eva-innsyn/scripts/heili-speglar.sh`.
+
 **Staðfestu áður en þú fullyrðir.** Eitt `grep` er ekki staðfesting — lestu
 kallið á enda. Ef þú veist ekki, segðu að þú vitir ekki.
 
