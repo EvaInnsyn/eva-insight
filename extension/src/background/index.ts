@@ -499,7 +499,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const res = await fetch(`${PLATFORM.apiUrl}${PLATFORM.foldersPath}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name: String((message as { name?: string }).name ?? "") }),
+        body: JSON.stringify({
+          name: String((message as { name?: string }).name ?? ""),
+          // Yfirmappa: mappan verður til inni í henni (valkvætt).
+          ...((message as { parentId?: string }).parentId
+            ? { parent_id: (message as { parentId?: string }).parentId }
+            : {}),
+        }),
       });
       const body = (await res.json().catch(() => null)) as
         | { data?: { folder?: unknown } }

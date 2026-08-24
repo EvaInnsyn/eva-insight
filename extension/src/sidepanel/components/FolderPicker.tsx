@@ -24,6 +24,12 @@ export function FolderPicker({ value, onChange, visible }: Props) {
   const [listError, setListError] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
+  // Yfirmappa nýju möppunnar — "" = efsta stig. Ósk Vigdísar 24. ágúst:
+  // möppu má búa til INNI Í verkefni, ekki bara efst.
+  const [parentId, setParentId] = useState("");
+  // Leit yfir ALLAR möppur — flýtihnapparnir sýna aðeins þær nýlegustu og
+  // mappa utan þeirra var áður óveljanleg úr spjallinu.
+  const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -72,7 +78,10 @@ export function FolderPicker({ value, onChange, visible }: Props) {
     }
     return parts.join(" › ");
   };
-  const choices = (folders ?? []).slice(0, 8);
+  const q = query.trim().toLowerCase();
+  const choices = q
+    ? (folders ?? []).filter((f) => pathLabel(f).toLowerCase().includes(q)).slice(0, 12)
+    : (folders ?? []).slice(0, 8);
 
   const createFolder = async () => {
     const name = newName.trim();
@@ -82,6 +91,7 @@ export function FolderPicker({ value, onChange, visible }: Props) {
       const res = (await chrome.runtime.sendMessage({
         type: "folders/create",
         name,
+        ...(parentId ? { parentId } : {}),
       })) as { ok?: boolean; folder?: Folder };
       if (res?.ok && res.folder) {
         onChange({ id: res.folder.id, name: res.folder.name });
@@ -90,6 +100,7 @@ export function FolderPicker({ value, onChange, visible }: Props) {
       setBusy(false);
       setCreating(false);
       setNewName("");
+      setParentId("");
     }
   };
 
@@ -100,6 +111,14 @@ export function FolderPicker({ value, onChange, visible }: Props) {
         <div className="eva-folder-picker-loading" style={{ marginBottom: 6 }}>
           Náði ekki möppulistanum, skráðu þig inn aftur í stillingum ef þetta lagast ekki.
         </div>
+      )}
+      {folders !== null && folders.length > 8 && (
+        <input
+          className="eva-folder-picker-search"
+          value={query}
+          placeholder="Leita í möppum…"
+          onChange={(e) => setQuery(e.target.value)}
+        />
       )}
       <div className="eva-folder-picker-chips">
         {folders === null ? (
@@ -128,6 +147,18 @@ export function FolderPicker({ value, onChange, visible }: Props) {
                     if (e.key === "Escape") setCreating(false);
                   }}
                 />
+                <select
+                  value={parentId}
+                  onChange={(e) => setParentId(e.target.value)}
+                  title="Hvar á nýja mappan að vera?"
+                >
+                  <option value="">efst, engin yfirmappa</option>
+                  {(folders ?? []).map((f) => (
+                    <option key={f.id} value={f.id}>
+                      inni í {pathLabel(f)}
+                    </option>
+                  ))}
+                </select>
                 <button type="button" onClick={createFolder} disabled={busy || !newName.trim()}>
                   {busy ? "…" : "Búa til"}
                 </button>
