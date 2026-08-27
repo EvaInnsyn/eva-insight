@@ -21,7 +21,19 @@ export const MODEL_PRICES: Record<string, [number, number]> = {
   "claude-opus-4-6": [5, 25],
   "claude-sonnet-4-6": [3, 15],
   "claude-haiku-4-5-20251001": [1, 5],
+  // OpenAI — valkvætt módel í Evu-spjallinu frá 27. ágúst 2026.
+  // ATH: verðin eru af OpenAI-verðskrá og verða að vera uppfærð þar sem
+  // þau breytast, alveg eins og Anthropic-verðin hér að ofan. Rangt verð
+  // hér þýðir ranga krónutölu á reikningi viðskiptavinar.
+  "gpt-5": [1.25, 10],
+  "gpt-5-mini": [0.25, 2],
+  "gpt-5-nano": [0.05, 0.4],
 };
+
+/** Er þetta OpenAI-módel? Ræður hvor leiðin er farin í /v1/chat. */
+export function isOpenAiModel(model: string | null | undefined): boolean {
+  return typeof model === "string" && model.startsWith("gpt-");
+}
 export const DEFAULT_PRICE: [number, number] = [3, 15];
 
 export function priceOf(model: string | null | undefined): [number, number] {

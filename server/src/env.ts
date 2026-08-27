@@ -76,6 +76,12 @@ const EnvSchema = z.object({
    * (still logged in usage_events for admin stats). Shown as UMSJÁ.
    */
   EVA_INTERNAL_EMAILS: z.string().default(""),
+  /**
+   * OpenAI-lykill. Valkvæður: sé hann ekki settur er ChatGPT einfaldlega
+   * ekki í boði sem módel í spjallinu og allt keyrir á Anthropic eins og
+   * áður. Sett á Railway, ekki hér.
+   */
+  OPENAI_API_KEY: z.string().min(1).optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

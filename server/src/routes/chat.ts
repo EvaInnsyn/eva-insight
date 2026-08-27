@@ -18,8 +18,9 @@ import { getClient, withSystemCache, withToolsCache } from "../anthropic.js";
 import { authenticate, authErrorResponse } from "../auth.js";
 import { chargeCredit, recordUsage, cachePlatformBalance } from "../db.js";
 import { spendPlatformCredits, unifiedCreditsEnabled, resolveTenantId } from "../supabase.js";
-import { costIsk } from "../pricing.js";
+import { costIsk, isOpenAiModel } from "../pricing.js";
 import { spendMultiplier } from "../tiers.js";
+import { streamOpenAi, systemToText, toOpenAiMessages } from "../openai.js";
 
 const ChatRequestSchema = z.object({
   /** Override the server default; otherwise pinned to Opus 4.6. */
@@ -84,6 +85,23 @@ chatRoute.post("/", async (c) => {
   // --- Build Anthropic request ----------------------------------------
   const client = getClient();
   const model = req.model ?? env.EVA_INSIGHT_DEFAULT_MODEL;
+
+  // ChatGPT er valkvætt módel í Evu-spjallinu (27. ágúst 2026). Sé lykillinn
+  // ekki settur á Railway er það einfaldlega ekki í boði — og notandinn á að
+  // fá að vita það, ekki þögult afturhvarf á Claude sem lítur út eins og
+  // valið hafi ekki virkað.
+  const useOpenAi = isOpenAiModel(model);
+  if (useOpenAi && !env.OPENAI_API_KEY) {
+    return c.json(
+      {
+        error: {
+          type: "model_unavailable",
+          message: "ChatGPT er ekki í boði á þessum þjóni (OPENAI_API_KEY vantar).",
+        },
+      },
+      503,
+    );
+  }
   const maxTokens = req.max_tokens ?? 64_000; // streaming → safe headroom
   const system = withSystemCache(
     req.system as string | Anthropic.TextBlockParam[] | undefined,
@@ -105,28 +123,6 @@ chatRoute.post("/", async (c) => {
     sse.onAbort(() => abort.abort());
 
     try {
-      const stream = client.messages.stream(
-        {
-          model,
-          max_tokens: maxTokens,
-          // Top-level auto-caching: caches the last cacheable block in
-          // messages, so multi-turn conversations hit the cached prefix.
-          cache_control: { type: "ephemeral" },
-          ...(system ? { system } : {}),
-          ...(tools ? { tools } : {}),
-          ...(req.thinking ? { thinking: req.thinking } : {}),
-          ...(req.output_config ? { output_config: req.output_config } : {}),
-          ...(req.metadata ? { metadata: req.metadata } : {}),
-          messages: req.messages as Anthropic.MessageParam[],
-        },
-        {
-          signal: abort.signal,
-          ...(req.betas?.length
-            ? { headers: { "anthropic-beta": req.betas.join(",") } }
-            : {}),
-        },
-      );
-
       let inputTokens = 0;
       let outputTokens = 0;
       // H4 — prompt-cache visibility. If cacheRead stays 0 across a
@@ -136,6 +132,62 @@ chatRoute.post("/", async (c) => {
       let cacheCreateTokens = 0;
 
       try {
+        if (useOpenAi) {
+          // ChatGPT-leiðin. Straumurinn er ÞÝDDUR yfir í sömu SSE-atburði og
+          // Anthropic sendir, svo vafrinn viti ekki muninn og
+          // `lib/eva/chat.ts` þurfi enga breytingu. Mælingin fyrir neðan er
+          // óbreytt — hún tekur bara model + tokens.
+          await streamOpenAi({
+            apiKey: env.OPENAI_API_KEY!,
+            model,
+            messages: toOpenAiMessages(
+              req.messages as { role: string; content: unknown }[],
+              systemToText(
+                req.system as string | { type?: string; text?: string }[] | undefined,
+              ),
+            ),
+            maxTokens,
+            signal: abort.signal,
+            handlers: {
+              aborted: () => sse.aborted,
+              onText: async (text) => {
+                await sse.writeSSE({
+                  event: "content_block_delta",
+                  data: JSON.stringify({
+                    type: "content_block_delta",
+                    index: 0,
+                    delta: { type: "text_delta", text },
+                  }),
+                });
+              },
+              onUsage: (inTok, outTok) => {
+                inputTokens = inTok;
+                outputTokens = outTok;
+              },
+            },
+          });
+        } else {
+        const stream = client.messages.stream(
+          {
+            model,
+            max_tokens: maxTokens,
+            // Top-level auto-caching: caches the last cacheable block in
+            // messages, so multi-turn conversations hit the cached prefix.
+            cache_control: { type: "ephemeral" },
+            ...(system ? { system } : {}),
+            ...(tools ? { tools } : {}),
+            ...(req.thinking ? { thinking: req.thinking } : {}),
+            ...(req.output_config ? { output_config: req.output_config } : {}),
+            ...(req.metadata ? { metadata: req.metadata } : {}),
+            messages: req.messages as Anthropic.MessageParam[],
+          },
+          {
+            signal: abort.signal,
+            ...(req.betas?.length
+              ? { headers: { "anthropic-beta": req.betas.join(",") } }
+              : {}),
+          },
+        );
         for await (const event of stream) {
           if (sse.aborted) break;
           // Track usage as it accumulates so we still meter on early abort
@@ -163,6 +215,7 @@ chatRoute.post("/", async (c) => {
             event: event.type,
             data: JSON.stringify(event),
           });
+        }
         }
       } finally {
         // One compact cache line per request. hit% = read / (read + fresh input).
