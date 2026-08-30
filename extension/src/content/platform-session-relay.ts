@@ -66,7 +66,7 @@ window.addEventListener("storage", (e) => {
 window.addEventListener("message", (e) => {
   if (e.source !== window || e.origin !== window.location.origin) return;
   const d = e.data as
-    | { source?: string; type?: string; prompt?: unknown }
+    | { source?: string; type?: string; prompt?: unknown; startUrl?: unknown }
     | null;
   if (!d || d.source !== "eva-platform" || d.type !== "eva_task") return;
   if (typeof d.prompt !== "string" || !d.prompt.trim()) return;
@@ -75,6 +75,11 @@ window.addEventListener("message", (e) => {
     .sendMessage({
       type: "platform/startTask",
       prompt: d.prompt.slice(0, 4000),
+      // Handrit-verk bera slóðina sem verkið byrjar á — background siglir
+      // þangað vélrænt (núll tokens) áður en Eva tekur við.
+      ...(typeof d.startUrl === "string" && d.startUrl.trim()
+        ? { startUrl: d.startUrl.slice(0, 2000) }
+        : {}),
     })
     .then(() => {
       window.postMessage(

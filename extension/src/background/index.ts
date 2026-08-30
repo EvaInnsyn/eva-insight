@@ -571,6 +571,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: false });
       return false;
     }
+    // Handrit-verk: platformurinn sendir slóðina sem verkið byrjar á og við
+    // siglum þangað VÉLRÆNT — Eva byrjar þá á réttri síðu í stað þess að
+    // eyða umferðum (og tokens) í að finna hana sjálf. Aðeins https, og
+    // aðeins úr content-scriptinu á app.evai.is (manifest afmarkar það).
+    const rawStartUrl = (m as { startUrl?: unknown }).startUrl;
+    let startUrl: string | null = null;
+    if (typeof rawStartUrl === "string") {
+      try {
+        const parsed = new URL(rawStartUrl);
+        if (parsed.protocol === "https:") startUrl = parsed.toString();
+      } catch {
+        /* ógild slóð — verkið heldur sínu striki án hennar */
+      }
+    }
     chrome.storage.local
       .set({
         "eva:pendingPlatformTask": { prompt: prompt.slice(0, 4000), createdAt: Date.now() },
@@ -578,6 +592,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .then(() => {
         const tabId = _sender.tab?.id;
         if (typeof tabId === "number") {
+          if (startUrl) {
+            chrome.tabs.update(tabId, { url: startUrl }).catch(() => {});
+          }
           // Krafan um user-gesture rofnar stundum á leiðinni — þá bíður
           // verkefnið bara þar til notandinn opnar spjaldið sjálfur.
           chrome.sidePanel.open({ tabId }).catch(() => {});
