@@ -44,14 +44,20 @@ export function App() {
     : liveTab;
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  // Spjallið er tilbúið með HVORRI leiðinni sem er: platform-innskráning
+  // (proxy-client notar accessToken, sharedSecret er þá varaleið) eða
+  // handvirk stilling. Áður læsti !isConfigured reitnum þótt platform-notandi
+  // væri innskráður og verk í fullum gangi — hann gat þá ekki svarað Evu.
+  const chatReady = isConfigured || platform.status.connected;
+
   // First-run: auto-open settings exactly once if we boot up unconfigured.
   const firstRunChecked = useRef(false);
   useEffect(() => {
     if (firstRunChecked.current) return;
-    if (!settingsLoaded) return;
+    if (!settingsLoaded || !platform.loaded) return;
     firstRunChecked.current = true;
-    if (!isConfigured) setSettingsOpen(true);
-  }, [settingsLoaded, isConfigured]);
+    if (!isConfigured && !platform.status.connected) setSettingsOpen(true);
+  }, [settingsLoaded, isConfigured, platform.loaded, platform.status.connected]);
 
   // Verkefni frá plattforminum (t.d. „settu Eva-merkið á vefinn"): sótt við
   // ræsingu og um leið og background lætur vita. Möppuvalinu er sleppt,
@@ -140,9 +146,9 @@ export function App() {
         </div>
       ) : null}
 
-      {!isConfigured && !settingsOpen ? (
+      {!chatReady && !settingsOpen ? (
         <div className="eva-banner">
-          <span>Set the proxy URL and shared secret to start chatting.</span>
+          <span>Skráðu þig inn með Eva-aðganginum þínum til að spjalla.</span>
           <button
             type="button"
             className="eva-link"
@@ -167,9 +173,11 @@ export function App() {
         onSend={send}
         onStop={abort}
         streaming={streaming}
-        disabled={!isConfigured}
+        disabled={!chatReady}
         disabledReason={
-          !isConfigured ? "Set proxy URL + secret to enable chat" : undefined
+          !chatReady
+            ? "Skráðu þig inn með Eva-aðganginum þínum í stillingunum"
+            : undefined
         }
       />
 

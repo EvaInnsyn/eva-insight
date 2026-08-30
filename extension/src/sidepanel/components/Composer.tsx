@@ -210,7 +210,7 @@ export function Composer({
           className="eva-input"
           placeholder={
             disabled
-              ? "Configure settings to start chatting"
+              ? "Skráðu þig inn í stillingunum til að spjalla"
               : streaming
                 ? "Streaming…"
                 : "Skrifaðu, eða settu inn mynd eða skjal…"

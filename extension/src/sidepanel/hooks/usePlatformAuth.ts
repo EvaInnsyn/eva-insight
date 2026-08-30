@@ -23,13 +23,16 @@ function toStatus(stored: unknown): PlatformStatus {
 
 export function usePlatformAuth() {
   const [status, setStatus] = useState<PlatformStatus>({ connected: false });
+  const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     chrome.storage.local.get(PLATFORM_AUTH_KEY).then((raw) => {
-      if (!cancelled) setStatus(toStatus(raw[PLATFORM_AUTH_KEY]));
+      if (cancelled) return;
+      setStatus(toStatus(raw[PLATFORM_AUTH_KEY]));
+      setLoaded(true);
     });
 
     const onChange = (
@@ -80,5 +83,5 @@ export function usePlatformAuth() {
     }
   }, []);
 
-  return { status, busy, error, signIn, signOut };
+  return { status, loaded, busy, error, signIn, signOut };
 }
