@@ -174,22 +174,26 @@ export async function syncSession(params: {
 }
 
 /**
- * Fetches proxy URL + token from the platform and saves them to settings.
- * Called automatically after sign-in so users never see the pairing token.
+ * Fetches the proxy URL from the platform and saves it to settings, so the
+ * user never configures anything by hand. Auth við proxyinn er Supabase-JWT
+ * notandans sjálfs; `proxyToken` er arfur og er AÐEINS skrifað ef platformurinn
+ * sendir það enn — endinn á ekki lengur að afhenda dev-lykil proxysins.
  */
 async function fetchAndApplyProxyConfig(accessToken: string): Promise<void> {
   const res = await fetch(`${PLATFORM.apiUrl}${PLATFORM.configPath}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) {
-    // 503 = EVA_INSIGHT_SHARED_SECRET er ósett á Vercel. Ekki stopp —
-    // proxyinn tekur Supabase-JWT beint — en skráum það svo það sjáist.
     console.warn(`[eva-insight] extension/config skilaði HTTP ${res.status}`);
     return;
   }
   const body = (await res.json()) as { data?: { proxyUrl?: string; proxyToken?: string } };
   const { proxyUrl, proxyToken } = body.data ?? {};
-  if (!proxyUrl || !proxyToken) return;
+  if (!proxyUrl) return;
   const current = await readSettings();
-  await writeSettings({ ...current, proxyUrl, sharedSecret: proxyToken });
+  await writeSettings({
+    ...current,
+    proxyUrl,
+    ...(proxyToken ? { sharedSecret: proxyToken } : {}),
+  });
 }
