@@ -2,10 +2,15 @@
  * Polls /v1/me on the proxy so the side panel can show "X / Y tokens
  * used this month". Refreshes every 30s and on demand (via the returned
  * `refresh` function).
+ *
+ * Kallið fer GEGNUM background ("usage/fetch"), sem heldur á platform-
+ * aðgangslyklinum og fellur á sharedSecret. Platform-notendur hafa oft
+ * ekkert sharedSecret, svo beint fetch héðan sýndi þeim aldrei mælinn.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import { useSettings } from "./useSettings";
+import { usePlatformAuth } from "./usePlatformAuth";
 
 export type UsageInfo =
   | {
@@ -46,7 +51,11 @@ interface State {
 const REFRESH_MS = 30_000;
 
 export function useUsage() {
-  const { settings, isConfigured } = useSettings();
+  const { isConfigured } = useSettings();
+  const { status: platform } = usePlatformAuth();
+  // Sama hlið og spjallið sjálft (fe926bf): platform-innskráning EÐA
+  // handvirk stilling með sharedSecret.
+  const canFetch = isConfigured || platform.connected;
   const [state, setState] = useState<State>({
     info: null,
     loading: false,
@@ -54,21 +63,16 @@ export function useUsage() {
   });
 
   const refresh = useCallback(async () => {
-    if (!isConfigured) return;
+    if (!canFetch) return;
     setState((s) => ({ ...s, loading: true }));
     try {
-      const url = new URL("/v1/me", settings.proxyUrl).toString();
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${settings.sharedSecret}` },
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as
-          | { error?: { message?: string } }
-          | null;
-        throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
+      const res = (await chrome.runtime.sendMessage({
+        type: "usage/fetch",
+      })) as { ok: true; info: UsageInfo } | { ok: false; error: string } | undefined;
+      if (!res?.ok) {
+        throw new Error(res && "error" in res ? res.error : "unknown error");
       }
-      const info = (await res.json()) as UsageInfo;
-      setState({ info, loading: false, error: null });
+      setState({ info: res.info, loading: false, error: null });
     } catch (err) {
       setState({
         info: null,
@@ -76,14 +80,14 @@ export function useUsage() {
         error: err instanceof Error ? err.message : "unknown error",
       });
     }
-  }, [isConfigured, settings.proxyUrl, settings.sharedSecret]);
+  }, [canFetch]);
 
   useEffect(() => {
     refresh();
-    if (!isConfigured) return;
+    if (!canFetch) return;
     const id = setInterval(refresh, REFRESH_MS);
     return () => clearInterval(id);
-  }, [refresh, isConfigured]);
+  }, [refresh, canFetch]);
 
   return { ...state, refresh };
 }

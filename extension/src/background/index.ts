@@ -546,6 +546,41 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  // Notkunarmælirinn: spjaldið sækir /v1/me GEGNUM background, sem heldur á
+  // platform-tókanum. Platform-notendur hafa oft ekkert sharedSecret, svo
+  // beint kall úr spjaldinu myndi aldrei auðkennast (sama rót og fe926bf).
+  if (m.type === "usage/fetch") {
+    (async () => {
+      const settings = await readSettings();
+      const accessToken = await getAccessToken();
+      const bearer = accessToken ?? (settings.sharedSecret.trim() || null);
+      if (!settings.proxyUrl.trim() || !bearer) {
+        sendResponse({ ok: false, error: "not_connected" });
+        return;
+      }
+      const res = await fetch(new URL("/v1/me", settings.proxyUrl).toString(), {
+        headers: { Authorization: `Bearer ${bearer}` },
+      });
+      const body = (await res.json().catch(() => null)) as
+        | { error?: { message?: string } }
+        | null;
+      if (!res.ok) {
+        sendResponse({
+          ok: false,
+          error: body?.error?.message ?? `HTTP ${res.status}`,
+        });
+        return;
+      }
+      sendResponse({ ok: true, info: body });
+    })().catch((err) =>
+      sendResponse({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return true;
+  }
+
   // Eva Innsýn platform: sign in / out / status (request-response).
   if (
     m.type === "platform/signIn" ||

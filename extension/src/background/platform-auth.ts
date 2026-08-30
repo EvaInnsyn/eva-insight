@@ -181,7 +181,12 @@ async function fetchAndApplyProxyConfig(accessToken: string): Promise<void> {
   const res = await fetch(`${PLATFORM.apiUrl}${PLATFORM.configPath}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
-  if (!res.ok) return;
+  if (!res.ok) {
+    // 503 = EVA_INSIGHT_SHARED_SECRET er ósett á Vercel. Ekki stopp —
+    // proxyinn tekur Supabase-JWT beint — en skráum það svo það sjáist.
+    console.warn(`[eva-insight] extension/config skilaði HTTP ${res.status}`);
+    return;
+  }
   const body = (await res.json()) as { data?: { proxyUrl?: string; proxyToken?: string } };
   const { proxyUrl, proxyToken } = body.data ?? {};
   if (!proxyUrl || !proxyToken) return;
