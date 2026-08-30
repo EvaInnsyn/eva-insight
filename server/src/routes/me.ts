@@ -9,7 +9,13 @@
 import { Hono } from "hono";
 import { loadEnv } from "../env.js";
 import { authenticate, authErrorResponse } from "../auth.js";
-import { expireLotsForUser, findUserById, nextLotExpiry, periodResetsAt } from "../db.js";
+import {
+  activeLotGranted,
+  expireLotsForUser,
+  findUserById,
+  nextLotExpiry,
+  periodResetsAt,
+} from "../db.js";
 
 export const meRoute = new Hono();
 
@@ -43,10 +49,17 @@ meRoute.get("/", async (c) => {
     if (expireLotsForUser(u.id) > 0) {
       u = findUserById(u.id) ?? u;
     }
-    // Dashboards show the FULL purchased amount + % remaining — the tier's
-    // burn rate is already applied at spend time, never in the display.
-    const purchased = Math.max(0, Math.round(u.credit_granted_isk ?? 0));
+    // Nefnarinn í „% eftir" er upprunaupphæð VIRKU lotanna (halda enn
+    // inneign), ekki ævisumma allra veitinga: annars sýnir nýtt 10.000 kr
+    // kaup hjá eldri kúnna „88% notað" og viðbótin varar við að ástæðulausu.
+    // Ævisumman er varaleið fyrir notendur án lota (t.d. staða beint af
+    // platforminum án staðbundinna lota).
     const balance = Math.max(0, Math.round(u.credit_balance_isk ?? 0));
+    const active = Math.round(activeLotGranted(u.id));
+    const purchased = Math.max(
+      balance,
+      active > 0 ? active : Math.max(0, Math.round(u.credit_granted_isk ?? 0)),
+    );
     const percent =
       purchased > 0 ? Math.min(100, Math.max(0, Math.round((balance / purchased) * 100))) : 0;
     // „Rennur út eftir X daga" — næsta fyrning keyptrar inneignar.

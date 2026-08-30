@@ -639,6 +639,22 @@ export function expireLotsForUser(userId: string): number {
   return forfeited;
 }
 
+/**
+ * Upprunaupphæð lotanna sem enn halda inneign — nefnarinn í „% eftir".
+ * Ævisumman (credit_granted_isk) dugar ekki þar: notandi sem hefur fengið
+ * inneign mánuðum saman og kaupir 10.000 kr í dag væri annars sagður með
+ * ~12% eftir af fullri, nýkeyptri inneign.
+ */
+export function activeLotGranted(userId: string): number {
+  const row = getDb()
+    .prepare(
+      `SELECT COALESCE(SUM(granted_isk), 0) AS g FROM credit_lots
+       WHERE user_id = ? AND balance_isk > 0`,
+    )
+    .get(userId) as { g: number };
+  return row.g;
+}
+
 /** Næsta fyrning með stöðu > 0 — fyrir „rennur út eftir X daga" birtingu. */
 export function nextLotExpiry(
   userId: string,
