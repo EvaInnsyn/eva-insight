@@ -123,9 +123,10 @@ textarea {
 }
 
 .eva-logo-img {
-  width: 28px;
+  /* Augað er breitt (1,54:1). Hæðin ræður og breiddin fylgir — ferningsvídd
+     kremur það eða skilur eftir tómt pláss beggja vegna. */
   height: 28px;
-  object-fit: contain;
+  width: auto;
 }
 
 .eva-logo-name {
@@ -337,8 +338,10 @@ textarea {
 }
 
 .eva-empty-eye {
-  width: 96px;
+  /* Sama og að ofan: hér VAR hvorki object-fit né sjálfvirk breidd, svo
+     merkið hefði kremst í ferning. */
   height: 96px;
+  width: auto;
 }
 
 .eva-empty-headline {
