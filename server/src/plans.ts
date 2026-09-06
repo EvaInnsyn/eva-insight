@@ -2,7 +2,7 @@
  * Eva subscription plans (2026-08-12: ný verðskrá — áskrift + innifalin
  * mánaðarinneign í stað stakra inneignarkaupa).
  *
- *   INNSÝN  —  4.800 kr/mán — 1.000 kr innifalin inneign á mánuði
+ *   INNSÝN  —  6.900 kr/mán — 1.000 kr innifalin inneign á mánuði
  *   YFIRSÝN — 18.800 kr/mán — 3.000 kr innifalin inneign á mánuði
  *   UMSJÁ   — horfin sem áskrift; er hér aðeins sem LEGACY-merki svo eldri
  *             notendaraðir birtist rétt. Ekki hægt að kaupa.
@@ -33,7 +33,7 @@ export const PLANS: Record<PlanId, Plan> = {
   innsyn: {
     id: "innsyn",
     displayName: "INNSÝN",
-    priceIsk: 4_800,
+    priceIsk: 6_900,
     includedMonthlyIsk: 1_000,
     apiCapUsd: 20,
     monthlyCapInputTokens: 5_000_000,
