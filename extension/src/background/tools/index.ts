@@ -918,7 +918,7 @@ async function zoomRegion(region: [number, number, number, number]): Promise<Rec
   const [x1, y1, x2, y2] = region;
   if (!(x2 > x1) || !(y2 > y1)) throw new Error("zoom region must be [x1,y1,x2,y2] with x2>x1, y2>y1");
   const { dataUrl, dpr } = await captureRaw();
-  const blob = await (await fetch(dataUrl)).blob();
+  const blob = dataUrlToBlob(dataUrl);
   const bitmap = await createImageBitmap(blob);
   // screenshot-image px → raw-capture px: image * coordScale = CSS; CSS * dpr = raw.
   const f = coordScale * dpr;
@@ -940,6 +940,36 @@ async function zoomRegion(region: [number, number, number, number]): Promise<Rec
     base64,
     note: `zoomed view of [${x1},${y1}]–[${x2},${y2}] — do NOT click using this image's coordinates; take a normal screenshot for coordinates`,
   };
+}
+
+/**
+ * `data:`-slóð → Blob ÁN `fetch`.
+ *
+ * CSP viðbótarinnar er `connect-src https:` (manifest.config.ts), svo
+ * `fetch("data:…")` er STÖÐVAÐ: „Refused to connect because it violates the
+ * document's Content Security Policy".
+ *
+ * Þetta braut hverja einustu skjámynd án þess að nokkur sæi það:
+ * `downscaleShot` greip villuna og sendi HRÁU myndina í fullri upplausn í
+ * staðinn — fleiri tokens og dýrara kall í hvert sinn — og `zoomRegion`
+ * kastaði alveg. Villurnar söfnuðust bara upp í chrome://extensions.
+ *
+ * Afkóðunin hér snertir ekkert net og fellur því ekki undir CSP.
+ */
+function dataUrlToBlob(dataUrl: string): Blob {
+  const comma = dataUrl.indexOf(",");
+  if (comma === -1) throw new Error("dataUrlToBlob: ekki gild data-slóð");
+  const meta = dataUrl.slice(0, comma);
+  const body = dataUrl.slice(comma + 1);
+  const mime = /^data:([^;,]+)/.exec(meta)?.[1] ?? "application/octet-stream";
+
+  if (!meta.includes(";base64")) {
+    return new Blob([decodeURIComponent(body)], { type: mime });
+  }
+  const binary = atob(body);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
@@ -1878,7 +1908,7 @@ async function downscaleShot(
 ): Promise<{ base64: string; scale: number }> {
   const stripPrefix = (u: string) => u.replace(/^data:image\/[a-z]+;base64,/, "");
   try {
-    const blob = await (await fetch(dataUrl)).blob();
+    const blob = dataUrlToBlob(dataUrl);
     const bitmap = await createImageBitmap(blob);
 
     // CSS dimensions of the captured area.
