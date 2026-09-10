@@ -36,7 +36,10 @@ Deployast sjálfkrafa við push á `main`.
 - `server/src/db.ts` — `credit_lots`, `usage_events`, `credit_events`,
   brennsluröð og fyrning.
 - `server/src/routes/admin.ts` — gamla adminið, varið með
-  `EVA_INSIGHT_ADMIN_PASSWORD`. Eina virka leiðin til að gefa prufu-inneign.
+  `EVA_INSIGHT_ADMIN_PASSWORD`. Var eina leiðin til að gefa prufu-inneign —
+  **ekki lengur**: frá 29. ágúst 2026 er prufan 400 kr / 6 mán í platforminum
+  (`/admin/trials`) og hún opnar hliðið. `/v1/trial` hér er lögð niður þótt
+  hún sé enn tengd; ekki bæta við neinu sem skrifar í hana.
 - `server/src/supabase.ts` — hálfbyggð brú í platforminn (`resolveTenantId`,
   `insertEvents`).
 - `extension/` — Chrome-viðbótin sjálf.
