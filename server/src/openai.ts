@@ -62,12 +62,34 @@ export function systemToText(
  * `source`, OpenAI tekur `data:`-slóð. Skjáskot sem notandinn límir inn
  * fer því í gegnum þessa þýðingu, annars sæi ChatGPT hana aldrei.
  */
+/**
+ * Skjá-kafli spjaldsins í kerfisskeytinu. GPT-módel eiga það til að hunsa
+ * efni í miðju system-skeyti og fullyrða að þau „sjái ekki skjáinn" þótt
+ * textinn standi þar (Vigdís, 10. sept). Kaflinn er því klipptur úr system
+ * og skeytt framan á SÍÐASTA notandaskeytið — þar taka GPT-módel eftir
+ * honum. Gerist í hverri umbreytingu fyrir sig svo spjallsagan mengast
+ * aldrei, og Anthropic-leiðin er ósnert. Þolir bæði nýja sniðið (skýringin
+ * inni í kaflanum) og það eldra (skýringar-málsgrein á eftir `=== END ===`).
+ */
+const SCREEN_SECTION_RE =
+  /\n*=== WHAT IS ON THE USER'S SCREEN RIGHT NOW ===\n[\s\S]*?\n=== END ===(?:\n\nThis is the text of the page[\s\S]*?(?=\n\n|$))?/;
+
 export function toOpenAiMessages(
   messages: { role: string; content: unknown }[],
   system: string | null,
 ): OpenAiMessage[] {
+  let sys = system;
+  let screen: string | null = null;
+  if (sys) {
+    const m = sys.match(SCREEN_SECTION_RE);
+    if (m) {
+      screen = m[0].trim();
+      sys = sys.replace(SCREEN_SECTION_RE, "\n\n").replace(/\n{3,}/g, "\n\n").trim() || null;
+    }
+  }
+
   const out: OpenAiMessage[] = [];
-  if (system) out.push({ role: "system", content: system });
+  if (sys) out.push({ role: "system", content: sys });
 
   for (const m of messages) {
     const role = m.role === "assistant" ? "assistant" : "user";
@@ -94,6 +116,19 @@ export function toOpenAiMessages(
       // Aðrar blokkir (thinking, tool_use) eiga ekkert erindi til OpenAI.
     }
     if (parts.length > 0) out.push({ role, content: parts });
+  }
+
+  if (screen) {
+    for (let i = out.length - 1; i >= 0; i--) {
+      if (out[i].role !== "user") continue;
+      const c = out[i].content;
+      if (typeof c === "string") {
+        out[i] = { role: "user", content: `${screen}\n\n${c}` };
+      } else if (Array.isArray(c)) {
+        out[i] = { role: "user", content: [{ type: "text", text: screen }, ...c] };
+      }
+      break;
+    }
   }
   return out;
 }
