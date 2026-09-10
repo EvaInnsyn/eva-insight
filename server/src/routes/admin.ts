@@ -22,7 +22,6 @@ import {
   grantCredit,
   grantLot,
   renewIncludedLot,
-  grantTrialByEmail,
   listCreditEvents,
   getDb,
   getUserActivity,
@@ -537,23 +536,6 @@ adminRoute.post("/users/:id/credit", async (c) => {
     );
   }
   return c.redirect("/admin");
-});
-
-// Grant a 30-day trial (1500 ISK) to a new user by email.
-adminRoute.post("/grant-trial", async (c) => {
-  const body = await c.req.parseBody();
-  const email = String(body.email ?? "").trim().toLowerCase();
-  if (!email || !email.includes("@")) {
-    return c.json({ ok: false, error: "Invalid email" }, 400);
-  }
-  const user = grantTrialByEmail(email);
-  return c.json({
-    ok: true,
-    userId: user.id,
-    email: user.name,
-    balance: user.credit_balance_isk,
-    expiresAt: user.trial_expires_at,
-  });
 });
 
 // List all trial users with their status.

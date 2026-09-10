@@ -669,51 +669,6 @@ export function nextLotExpiry(
   return row ?? null;
 }
 
-/**
- * Grant a 1500 ISK trial to a user (by email), valid for 30 days.
- * Works for both new users and existing users.
- * Returns the user record with trial_expires_at set.
- */
-export function grantTrialByEmail(email: string): User {
-  const cleanEmail = email.trim().toLowerCase();
-
-  // Try to find existing user by name (email field)
-  let user = getDb()
-    .prepare<[string], User>("SELECT * FROM users WHERE LOWER(name) = ?")
-    .get(cleanEmail);
-
-  if (!user) {
-    // Create a new trial user without Supabase integration
-    const id = randomUUID();
-    const token = `tok_${randomBytes(24).toString("hex")}`;
-    const now = new Date().toISOString();
-    const periodKey = currentPeriodKey();
-    getDb()
-      .prepare(
-        `INSERT INTO users (id, name, token, plan, monthly_cap_input_tokens, monthly_cap_output_tokens, period_input_tokens, period_output_tokens, period_key, created_at, credit_balance_isk, supabase_user_id)
-         VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, 0, NULL)`,
-      )
-      .run(
-        id,
-        cleanEmail,
-        token,
-        "innsyn",
-        25_000_000,
-        1_500_000,
-        periodKey,
-        now,
-      );
-    user = findUserById(id)!;
-  }
-
-  grantCredit(user.id, 1500, "trial:30days");
-  const expiresAt = new Date();
-  expiresAt.setDate(expiresAt.getDate() + 30);
-  getDb()
-    .prepare("UPDATE users SET trial_expires_at = ? WHERE id = ?")
-    .run(expiresAt.toISOString(), user.id);
-  return findUserById(user.id)!;
-}
 
 export interface CreditEvent {
   ts: string;
