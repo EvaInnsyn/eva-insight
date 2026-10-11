@@ -1,5 +1,5 @@
 /**
- * Eva Insight — background service worker.
+ * Eva Innsyn — background service worker.
  *
  * Phase 2: owns the chat conversation, streams from the proxy, fans
  * tokens out to whatever side panel(s) are connected.

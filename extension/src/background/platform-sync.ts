@@ -1,7 +1,7 @@
 /**
  * Push a completed browser session to the Eva Innsýn platform.
  *
- * Maps Eva Insight's captured tool actions into the platform's ingest shape and
+ * Maps Eva Innsyn's captured tool actions into the platform's ingest shape and
  * POSTs them to /api/extension/session with the user's Supabase access token.
  * A no-op when the user hasn't connected their account or the turn had no
  * actions, so non-connected users are unaffected.

@@ -1,5 +1,5 @@
 /**
- * Eva Insight — proxy server (Phase 1).
+ * Eva Innsyn — proxy server (Phase 1).
  *
  * Routes:
  *   GET  /healthz   — liveness probe

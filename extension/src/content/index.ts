@@ -1,5 +1,5 @@
 /**
- * Eva Insight content script.
+ * Eva Innsyn content script.
  *
  * Phase 3: handles page/* messages from the background worker — reads the
  * accessibility tree, clicks, types, scrolls.

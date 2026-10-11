@@ -72,7 +72,7 @@ function loginHtml(error?: string): string {
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Eva Insight · Admin</title>
+<title>Eva Innsyn · Admin</title>
 <style>
 ${BASE}
 body { display:flex; align-items:center; justify-content:center; min-height:100vh; }
@@ -88,7 +88,7 @@ button:hover { background:#591625; }
 </head>
 <body>
 <div class="card">
-  <h1>Eva Insight</h1>
+  <h1>Eva Innsyn</h1>
   <div class="sub">Admin access required</div>
   <form method="POST" action="/admin/login">
     <input type="password" name="password" placeholder="Admin password" autofocus />
@@ -344,7 +344,7 @@ function dashboardHtml(
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Eva Insight · Admin</title>
+<title>Eva Innsyn · Admin</title>
 <style>
 ${BASE}
 header { background:white; border-bottom:1.5px solid #f0e0e8; padding:0 32px; height:56px; display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:10; }
@@ -371,7 +371,7 @@ tr:not(:last-child) td { border-bottom:1px solid #faf0f5; }
 </head>
 <body>
 <header>
-  <span class="logo">Eva Insight · Admin</span>
+  <span class="logo">Eva Innsyn · Admin</span>
   <a class="out" href="/admin/logout">Logout</a>
 </header>
 <main>

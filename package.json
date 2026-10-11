@@ -2,7 +2,7 @@
   "name": "eva-insight",
   "version": "0.0.0",
   "private": true,
-  "description": "Eva Insight — AI side panel for Chrome (sister product to Eva Platform)",
+  "description": "Eva Innsyn — AI side panel for Chrome (sister product to Eva Platform)",
   "workspaces": [
     "extension",
     "server"

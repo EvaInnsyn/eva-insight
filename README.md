@@ -1,6 +1,6 @@
-# Eva Insight
+# Eva Innsyn
 
-AI side panel for Chrome — Eva Insight reads the page you're on and acts on it (click, type, navigate, screenshot, inspect console & network). Driven by Claude through a backend proxy.
+AI side panel for Chrome — Eva Innsyn reads the page you're on and acts on it (click, type, navigate, screenshot, inspect console & network). Driven by Claude through a backend proxy.
 
 Full build plan: [PLAN.md](./PLAN.md).
 
@@ -39,7 +39,7 @@ This starts Vite with HMR for the side panel. The first build writes `extension/
 2. Toggle **Developer mode** on (top right).
 3. Click **Load unpacked**.
 4. Select the `extension/dist/` folder.
-5. Pin "Eva Insight" to the toolbar.
+5. Pin "Eva Innsyn" to the toolbar.
 6. Click the icon — the side panel opens.
 
 After code changes the build hot-reloads. If anything looks stale, hit the reload button on the extension card in `chrome://extensions`.

@@ -1,5 +1,5 @@
 """
-Resize Eva Insight eye assets.
+Resize Eva Innsyn eye assets.
 
 Two sources, by design:
     sources/source-icon.png  — tight crop of just lid+iris (no dotted tails)

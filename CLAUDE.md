@@ -1,4 +1,9 @@
-# Eva Insight — proxy + Chrome-viðbót
+# Eva Innsyn — proxy + Chrome-viðbót
+
+> Nafnið: kóði og skjöl sögðu „Eva Insight" til 11.10.2026 (Web Store-skráningin
+> hét þegar „Eva Innsyn", id nmdhlffhjnooegpinnagoajdaoapknho). Nú EITT vörumerki alls staðar —
+> „Eva Innsýn" á íslensku, „Eva Innsyn" (ASCII) í Web Store, kóða og þar sem
+> slegið er inn eða leitað. Ekki nota „Eva Insight" lengur.
 
 ## ⚠️ Lestu handoff-möppuna fyrst
 

@@ -9,7 +9,7 @@
 import { existsSync } from "node:fs";
 import { z } from "zod";
 
-// Eva Insight env vars we manage. Empty strings in the shell environment
+// Eva Innsyn env vars we manage. Empty strings in the shell environment
 // would otherwise mask values in .env (Node's loadEnvFile won't override
 // pre-set vars). Clearing them first lets .env always win in dev.
 const EVA_KEYS = [

@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * Eva Insight admin CLI.
+ * Eva Innsyn admin CLI.
  *
  * Usage:
  *   npm run admin -- list
@@ -36,7 +36,7 @@ const DB_PATH = process.env.EVA_INSIGHT_DB_PATH ?? "data/eva.db";
 
 function help(): void {
   console.log(`
-Eva Insight admin
+Eva Innsyn admin
 
   list                              List all users
   create <name> [--input N] [--output N]

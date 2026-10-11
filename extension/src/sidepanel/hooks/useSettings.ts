@@ -1,5 +1,5 @@
 /**
- * Reads and writes Eva Insight settings from chrome.storage.local.
+ * Reads and writes Eva Innsyn settings from chrome.storage.local.
  * Reactive — listens for storage changes so multiple side-panel instances
  * stay in sync.
  */

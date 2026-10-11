@@ -1,5 +1,5 @@
 /**
- * Streams one assistant turn from the Eva Insight proxy.
+ * Streams one assistant turn from the Eva Innsyn proxy.
  *
  * Phase 4: surfaces both text deltas (for live rendering) and tool_use
  * blocks (so the agent loop can execute and continue the conversation).
