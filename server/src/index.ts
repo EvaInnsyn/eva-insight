@@ -16,6 +16,7 @@ import { logger } from "hono/logger";
 import { allowedOrigins, loadEnv } from "./env.js";
 import { initDb } from "./db.js";
 import { chatRoute } from "./routes/chat.js";
+import { startQueueWorker } from "./platformQueue.js";
 import { meRoute } from "./routes/me.js";
 import { adminRoute } from "./routes/admin.js";
 import { planRoute } from "./routes/plan.js";
@@ -74,6 +75,10 @@ app.notFound((c) =>
     404,
   ),
 );
+
+// Biðröð gjaldfærslna á platforminn (áskriftarkerfi 2b-3): reynt aftur á
+// mínútu fresti með sama auðkenni, svo ekkert tapast og ekkert tvírukkast.
+startQueueWorker();
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   console.log(

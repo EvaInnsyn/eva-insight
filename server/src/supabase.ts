@@ -24,8 +24,13 @@ function creds(): { url: string; key: string } | null {
   return { url: env.SUPABASE_URL, key: env.SUPABASE_SERVICE_ROLE_KEY };
 }
 
-// Cache the supabase_user_id → organisation_id map; org membership is stable.
-const tenantCache = new Map<string, string>();
+// supabase_user_id → organisation_id. MEÐ líftíma (áskriftarkerfi 2b-3,
+// 17.10.2026): fyrirtækið er það sem notandinn hefur VALIÐ á platforminum
+// (fyrirtækjaflipar, switch_organisation), ekki fast. Án líftíma var minnið
+// aldrei tæmt og notandi sem skipti um fyrirtæki var rukkaður á það fyrra
+// þar til proxyinn var endurræstur.
+const TENANT_TTL_MS = 60_000;
+const tenantCache = new Map<string, { tenant: string; at: number }>();
 
 /**
  * Resolve a user's organisation (tenant) id via the platform's users table.
@@ -34,7 +39,7 @@ const tenantCache = new Map<string, string>();
  */
 export async function resolveTenantId(supabaseUserId: string): Promise<string | null> {
   const cached = tenantCache.get(supabaseUserId);
-  if (cached) return cached;
+  if (cached && Date.now() - cached.at < TENANT_TTL_MS) return cached.tenant;
   const c = creds();
   if (!c) return null;
 
@@ -46,7 +51,7 @@ export async function resolveTenantId(supabaseUserId: string): Promise<string | 
     if (!res.ok) return null;
     const rows = (await res.json()) as { organisation_id?: string }[];
     const tenant = rows[0]?.organisation_id ?? null;
-    if (tenant) tenantCache.set(supabaseUserId, tenant);
+    if (tenant) tenantCache.set(supabaseUserId, { tenant, at: Date.now() });
     return tenant;
   } catch {
     return null;
@@ -110,8 +115,15 @@ export function unifiedCreditsEnabled(): boolean {
 
 export interface PlatformCredit {
   tenantId: string;
-  /** Innifalin mánaðarinneign + ófyrnd keypt inneign, í krónum. */
+  /**
+   * Hvers pottur greiðir: móðurfyrirtækið ef `billing_org_id` er sett
+   * („Deila inneign"), annars fyrirtækið sjálft — sama regla og spend_credits.
+   */
+  payerId: string;
+  /** Innifalin mánaðarinneign + ófyrnd keypt inneign GREIÐANDANS, í krónum. */
   balanceIsk: number;
+  /** Verðþrep fyrirtækisins á platforminum (organisations.credit_tier). */
+  tier: string | null;
 }
 
 /**
@@ -122,6 +134,14 @@ export interface PlatformCredit {
  * platforminum (gamlir tok_-notendur og prufu-notendur) — þá gildir
  * SQLite-staðan áfram.
  */
+// Verðþrep platformsins per notanda, sett í hvert sinn sem staðan er sótt
+// (auth-hliðið gerir það á hverju kalli). Gjaldfærslan notar það svo sami
+// viðskiptavinur brenni á SAMA hraða hér og á platforminum.
+const tierCache = new Map<string, string | null>();
+export function cachedPlatformTier(supabaseUserId: string): string | null | undefined {
+  return tierCache.get(supabaseUserId);
+}
+
 export async function platformCreditFor(
   supabaseUserId: string,
 ): Promise<PlatformCredit | null> {
@@ -129,65 +149,158 @@ export async function platformCreditFor(
   if (!c) return null;
   const tenantId = await resolveTenantId(supabaseUserId);
   if (!tenantId) return null;
+  const headers = { apikey: c.key, Authorization: `Bearer ${c.key}` };
 
   try {
-    const nowIso = new Date().toISOString();
-    const [orgRes, lotsRes] = await Promise.all([
-      fetch(
-        `${c.url}/rest/v1/organisations?id=eq.${tenantId}&select=credits_remaining,billing_org_id`,
-        { headers: { apikey: c.key, Authorization: `Bearer ${c.key}` } },
-      ),
-      fetch(
-        `${c.url}/rest/v1/credit_purchase_logs?tenant_id=eq.${tenantId}&expired=is.false&expires_at=gt.${nowIso}&balance_remaining=gt.0&select=balance_remaining`,
-        { headers: { apikey: c.key, Authorization: `Bearer ${c.key}` } },
-      ),
-    ]);
-    if (!orgRes.ok || !lotsRes.ok) return null;
-    const org = (await orgRes.json()) as { credits_remaining: number }[];
-    const lots = (await lotsRes.json()) as { balance_remaining: number }[];
+    const orgRes = await fetch(
+      `${c.url}/rest/v1/organisations?id=eq.${tenantId}&select=credits_remaining,billing_org_id,credit_tier`,
+      { headers },
+    );
+    if (!orgRes.ok) return null;
+    const org = (await orgRes.json()) as {
+      credits_remaining: number;
+      billing_org_id: string | null;
+      credit_tier: string | null;
+    }[];
     if (!org[0]) return null;
-    const purchased = lots.reduce((s, l) => s + l.balance_remaining, 0);
-    return { tenantId, balanceIsk: (org[0].credits_remaining ?? 0) + purchased };
+
+    // „Deila inneign": barnið eyðir úr potti móðurinnar (spend_credits notar
+    // coalesce(billing_org_id, id)). Fram að 17.10 las proxyinn pott BARNSINS,
+    // sem er ~0, og hafnaði spjalli með 402 þótt móðirin ætti nóg.
+    const payerId = org[0].billing_org_id ?? tenantId;
+    let included = org[0].credits_remaining ?? 0;
+    if (payerId !== tenantId) {
+      const payerRes = await fetch(
+        `${c.url}/rest/v1/organisations?id=eq.${payerId}&select=credits_remaining`,
+        { headers },
+      );
+      if (!payerRes.ok) return null;
+      const payer = (await payerRes.json()) as { credits_remaining: number }[];
+      included = payer[0]?.credits_remaining ?? 0;
+    }
+
+    const nowIso = new Date().toISOString();
+    const lotsRes = await fetch(
+      `${c.url}/rest/v1/credit_purchase_logs?tenant_id=eq.${payerId}&expired=is.false&expires_at=gt.${nowIso}&balance_remaining=gt.0&select=balance_remaining`,
+      { headers },
+    );
+    if (!lotsRes.ok) return null;
+    const lots = (await lotsRes.json()) as { balance_remaining: number }[];
+    const purchased = lots.reduce((sum, l) => sum + Number(l.balance_remaining), 0);
+    tierCache.set(supabaseUserId, org[0].credit_tier ?? null);
+    return {
+      tenantId,
+      payerId,
+      balanceIsk: Number(included) + purchased,
+      tier: org[0].credit_tier ?? null,
+    };
   } catch {
     return null;
   }
 }
 
-/**
- * Gjaldfæra í platform-pottinum. Skilar nýrri stöðu, eða null ef kallið
- * mistókst — þá gjaldfærir kallarinn staðbundið svo notkun tapist ekki.
- *
- * p_allow_partial: notkunin er þegar afstaðin þegar hér er komið, svo það er
- * rangt að hafna henni. Betra að taka það sem til er og fara í mínus-núll en
- * að veita vinnuna ókeypis.
- */
-export async function spendPlatformCredits(
-  tenantId: string,
-  amountIsk: number,
-): Promise<number | null> {
+/** Kall á Postgres-fall platformsins. null = netvilla eða 5xx (má reyna aftur). */
+async function platformRpc<T>(
+  fn: string,
+  body: Record<string, unknown>,
+): Promise<{ ok: true; data: T } | { ok: false; retryable: boolean; status?: number } | null> {
   const c = creds();
-  if (!c || amountIsk <= 0) return null;
+  if (!c) return null;
   try {
-    const res = await fetch(`${c.url}/rest/v1/rpc/spend_credits`, {
+    const res = await fetch(`${c.url}/rest/v1/rpc/${fn}`, {
       method: "POST",
       headers: {
         apikey: c.key,
         Authorization: `Bearer ${c.key}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        p_tenant: tenantId,
-        // Óafrúnnað frá 15. ágúst 2026. Math.round hér þýddi að spjallkall
-        // undir 0,5 kr rukkaðist sem NÚLL — hin hliðin á sömu skekkju og
-        // platformurinn hafði, þar sem ódýrt kall var ofrukkað upp í 1 kr.
-        // spend_credits tekur numeric frá 20260815000003_fractional_credits.
-        p_amount: amountIsk,
-        p_allow_partial: true,
-      }),
+      body: JSON.stringify(body),
     });
-    if (!res.ok) return null;
-    return (await res.json()) as number;
+    if (!res.ok) return { ok: false, retryable: res.status >= 500 || res.status === 429, status: res.status };
+    return { ok: true, data: (await res.json()) as T };
   } catch {
-    return null;
+    return { ok: false, retryable: true };
   }
+}
+
+export interface PlatformSpendResult {
+  status: "charged" | "duplicate" | "insufficient" | "unknown_tenant";
+  /** Það sem RAUNVERULEGA dróst af (0 við tvítekningu). */
+  charged: number;
+  balance: number | null;
+}
+
+/**
+ * Gjaldfæra í platform-pottinum MEÐ AUÐKENNI (spend_credits_v2, 16.10.2026).
+ * Sama auðkenni tvisvar = rukkað einu sinni, svo biðröðin má reyna aftur og
+ * aftur án tvírukkunar.
+ *
+ * Skilar null þegar kallið mistókst á þann hátt að það má reyna aftur
+ * (netvilla, 5xx) — kallarinn setur þá gjaldfærsluna í biðröð. ALDREI
+ * fallið yfir á SQLite-inneignina (það var gamla leiðin, og hún rak í sundur).
+ *
+ * p_allow_partial: notkunin er þegar afstaðin, svo það er tekið það sem til
+ * er (niður í 0) frekar en að hafna. Inneign fer aldrei í mínus.
+ */
+export async function spendPlatformCreditsV2(
+  tenantId: string,
+  amountIsk: number,
+  key: string,
+  ctx: Record<string, unknown>,
+): Promise<PlatformSpendResult | null> {
+  if (amountIsk <= 0) return { status: "charged", charged: 0, balance: null };
+  const r = await platformRpc<{ status?: string; charged?: number; balance?: number | null }>(
+    "spend_credits_v2",
+    { p_tenant: tenantId, p_amount: amountIsk, p_key: key, p_allow_partial: true, p_ctx: ctx },
+  );
+  if (!r || !r.ok) return null;
+  const status = r.data.status as PlatformSpendResult["status"] | undefined;
+  if (!status) return null;
+  return {
+    status,
+    charged: Number(r.data.charged ?? 0),
+    balance: r.data.balance === null || r.data.balance === undefined ? null : Number(r.data.balance),
+  };
+}
+
+/** Stofnar verk á platforminum (eva_tasks). null ef það mistekst (best-effort). */
+export async function platformTaskStart(input: {
+  tenantId: string;
+  kind: "chat" | "extension_task";
+  userId?: string | null;
+  feature: string;
+  bucketKey?: string | null;
+}): Promise<string | null> {
+  const r = await platformRpc<string>("task_start", {
+    p_tenant: input.tenantId,
+    p_kind: input.kind,
+    p_initiated_by: "user",
+    p_user: input.userId ?? null,
+    p_feature: input.feature,
+    p_bucket_key: input.bucketKey ?? null,
+  });
+  return r && r.ok ? r.data : null;
+}
+
+/** Skráir kall á verk. Best-effort. */
+export async function platformTaskRecord(
+  taskId: string,
+  rawIsk: number,
+  chargedIsk: number,
+  failed = false,
+): Promise<void> {
+  await platformRpc("task_record_call", {
+    p_task: taskId,
+    p_raw: rawIsk,
+    p_charged: chargedIsk,
+    p_failed: failed,
+  });
+}
+
+/** Lokar verki. Best-effort. */
+export async function platformTaskFinish(
+  taskId: string,
+  status: "done" | "failed" | "cancelled" = "done",
+): Promise<void> {
+  await platformRpc("task_finish", { p_task: taskId, p_status: status });
 }
