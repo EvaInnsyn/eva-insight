@@ -43,7 +43,8 @@ app.use(
   cors({
     origin: origins,
     allowMethods: ["POST", "GET", "OPTIONS"],
-    allowHeaders: ["Authorization", "Content-Type"],
+    // x-eva-task-id: viðbótin safnar köllum eins verks í eitt (áskriftarkerfi 2b-3).
+    allowHeaders: ["Authorization", "Content-Type", "x-eva-task-id"],
     maxAge: 86_400,
   }),
 );
