@@ -15,7 +15,10 @@
 
 /** $ per 1M tokens [input, output]. Unknown/legacy (null) rows use Sonnet. */
 export const MODEL_PRICES: Record<string, [number, number]> = {
-  "claude-sonnet-5": [3, 15],
+  // $2/$10 (opinber verðskrá claude.com/pricing, staðfest 16.10.2026). Stóð
+  // $3/$15 frá 18.7 — verð Sonnet 4.6 — sem ofmat raunkostnaðinn um 50 % og
+  // brenndi inneign 1,5× hraðar en álagið (verðþrepið) segir til um.
+  "claude-sonnet-5": [2, 10],
   "claude-opus-4-8": [5, 25],
   "claude-opus-4-7": [5, 25],
   "claude-opus-4-6": [5, 25],
