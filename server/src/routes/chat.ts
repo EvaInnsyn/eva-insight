@@ -16,9 +16,19 @@ import Anthropic from "@anthropic-ai/sdk";
 import { loadEnv } from "../env.js";
 import { getClient, withSystemCache, withToolsCache } from "../anthropic.js";
 import { authenticate, authErrorResponse } from "../auth.js";
+import { randomUUID } from "node:crypto";
 import { chargeCredit, recordUsage, cachePlatformBalance } from "../db.js";
-import { spendPlatformCredits, unifiedCreditsEnabled, resolveTenantId } from "../supabase.js";
-import { costIsk, isOpenAiModel } from "../pricing.js";
+import {
+  cachedPlatformTier,
+  platformTaskFinish,
+  platformTaskRecord,
+  platformTaskStart,
+  resolveTenantId,
+  spendPlatformCreditsV2,
+  unifiedCreditsEnabled,
+} from "../supabase.js";
+import { enqueueCharge, queueAtCap } from "../platformQueue.js";
+import { costIsk, isOpenAiModel, rawCostIsk } from "../pricing.js";
 import { spendMultiplier } from "../tiers.js";
 import { streamOpenAi, systemToText, toOpenAiMessages } from "../openai.js";
 
@@ -116,6 +126,42 @@ chatRoute.post("/", async (c) => {
       ? "platform"
       : "extension";
 
+  // --- Platformið: verk + pása (áskriftarkerfi 2b-3, 17.10.2026) -------
+  // Notandi tengdur platforminum er rukkaður ÞAR, aldrei í SQLite. Hvert
+  // spjallkall er eitt verk (eva_tasks); viðbótin getur sent x-eva-task-id
+  // svo öll köll eins viðbótarverks safnist í eitt verk.
+  const platformUid =
+    user && !auth.internal && unifiedCreditsEnabled() ? user.supabase_user_id : null;
+  const platformTenant = platformUid ? await resolveTenantId(platformUid) : null;
+  if (platformTenant && queueAtCap(platformTenant)) {
+    // Þakregla Vigdísar: ógreitt í biðröð (platforminn svaraði ekki) má ekki
+    // vaxa endalaust — Eva fer í pásu þar til biðröðin er greidd.
+    return c.json(
+      {
+        error: {
+          type: "eva_paused",
+          message: "Eva er í stuttri pásu á meðan greiðslukerfið svarar ekki. Reyndu aftur eftir smástund.",
+        },
+      },
+      503,
+    );
+  }
+  const extTask = c.req.header("x-eva-task-id") ?? "";
+  const bucketKey = /^[A-Za-z0-9_-]{1,64}$/.test(extTask) ? `ext:${extTask}` : null;
+  const taskId = platformTenant
+    ? await platformTaskStart({
+        tenantId: platformTenant,
+        kind: usageSource === "extension" ? "extension_task" : "chat",
+        userId: platformUid,
+        feature: usageSource === "extension" ? "extension" : "chat",
+        bucketKey,
+      })
+    : null;
+  // Auðkenni gjaldfærslunnar: auðkenni skeytisins frá Anthropic þegar það
+  // berst (message_start), annars einkvæmt — búið til ÁÐUR en kallið fer.
+  let chargeKey = `chat:${randomUUID()}`;
+  let usageRecorded = false;
+
   // --- SSE passthrough -------------------------------------------------
   return streamSSE(c, async (sse) => {
     const abort = new AbortController();
@@ -192,6 +238,8 @@ chatRoute.post("/", async (c) => {
           if (sse.aborted) break;
           // Track usage as it accumulates so we still meter on early abort
           if (event.type === "message_start") {
+            const msgId = (event as { message?: { id?: string } }).message?.id;
+            if (msgId) chargeKey = `chat:${msgId}`;
             const usage = (event as {
               message?: {
                 usage?: {
@@ -230,30 +278,53 @@ chatRoute.post("/", async (c) => {
             // Innanhúss users are never charged — usage bills straight to
             // the Anthropic console (recordUsage above keeps admin stats).
             if (user.credit_balance_isk !== null && !auth.internal) {
-              const cost = costIsk(
-                model,
-                inputTokens,
-                outputTokens,
-                spendMultiplier(user.tier),
-              );
-              // Sameiginlegi potturinn: gjaldfæra í platforminum þegar
-              // notandinn er tengdur honum, annars staðbundið eins og áður.
-              // ALDREI hvort tveggja — það væri tvírukkun.
-              let chargedOnPlatform = false;
-              if (unifiedCreditsEnabled() && user.supabase_user_id) {
-                // resolveTenantId er í minni eftir hliðið, svo þetta er eitt
-                // netkall — ekki tvö. Gjaldfærslan situr í finally eftir að
-                // straumnum lýkur og hvert kall þar er áhætta á týndri notkun.
-                const tenantId = await resolveTenantId(user.supabase_user_id);
-                if (tenantId) {
-                  const left = await spendPlatformCredits(tenantId, cost);
-                  if (left !== null) {
-                    cachePlatformBalance(user.id, Math.max(0, left));
-                    chargedOnPlatform = true;
-                  }
+              if (platformTenant && platformUid) {
+                // Platforminn er sannleikurinn um inneign. Raunkostnaður MEÐ
+                // cache-tokens (sama regla og platformurinn), álag eftir
+                // verðþrepi platformsins.
+                const raw = rawCostIsk(
+                  model,
+                  inputTokens,
+                  outputTokens,
+                  cacheReadTokens,
+                  cacheCreateTokens,
+                );
+                const tier = cachedPlatformTier(platformUid) ?? user.tier;
+                const charge = raw * spendMultiplier(tier);
+                const ctx = {
+                  action: usageSource === "extension" ? "extension" : "chat",
+                  feature: usageSource === "extension" ? "extension" : "chat",
+                  user_id: platformUid,
+                  cost_isk_raw: raw,
+                  ...(taskId ? { task_id: taskId } : {}),
+                };
+                const res = await spendPlatformCreditsV2(platformTenant, charge, chargeKey, ctx);
+                if (res) {
+                  if (res.balance !== null) cachePlatformBalance(user.id, Math.max(0, res.balance));
+                  if (taskId) await platformTaskRecord(taskId, raw, res.charged);
+                } else {
+                  // Platforminn svaraði ekki: í biðröð með SAMA auðkenni,
+                  // reynt aftur á mínútu fresti. Aldrei á SQLite.
+                  enqueueCharge({
+                    key: chargeKey,
+                    tenantId: platformTenant,
+                    amountIsk: charge,
+                    rawIsk: raw,
+                    ctx,
+                    taskId,
+                  });
                 }
-              }
-              if (!chargedOnPlatform) {
+                usageRecorded = true;
+                if (taskId && !bucketKey) await platformTaskFinish(taskId, "done");
+              } else {
+                // Notandi EKKI tengdur platforminum (gamlir tok_-notendur):
+                // SQLite-inneignin eins og áður.
+                const cost = costIsk(
+                  model,
+                  inputTokens,
+                  outputTokens,
+                  spendMultiplier(user.tier),
+                );
                 chargeCredit(user.id, cost, "notkun");
               }
             }
@@ -261,8 +332,18 @@ chatRoute.post("/", async (c) => {
             console.error("[eva-insight] failed to record usage", e);
           }
         }
+        // Notandinn hætti áður en nokkur token voru unnin: verkinu lokað sem
+        // hætt við (villur fara í catch hér fyrir neðan og verða 'failed').
+        if (taskId && !usageRecorded && !bucketKey && sse.aborted) {
+          await platformTaskFinish(taskId, "cancelled").catch(() => {});
+        }
       }
     } catch (err) {
+      // Kall sem mistókst: skráð á verkið, aldrei rukkað.
+      if (taskId && !usageRecorded) {
+        await platformTaskRecord(taskId, 0, 0, true).catch(() => {});
+        if (!bucketKey) await platformTaskFinish(taskId, "failed").catch(() => {});
+      }
       if (sse.aborted) return; // client gave up; nothing to report
 
       // Surface SDK errors as a final SSE event so the client can render

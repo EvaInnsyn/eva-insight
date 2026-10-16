@@ -15,7 +15,10 @@
 
 /** $ per 1M tokens [input, output]. Unknown/legacy (null) rows use Sonnet. */
 export const MODEL_PRICES: Record<string, [number, number]> = {
-  "claude-sonnet-5": [3, 15],
+  // $2/$10 (opinber verðskrá claude.com/pricing, staðfest 16.10.2026). Stóð
+  // $3/$15 frá 18.7 — verð Sonnet 4.6 — sem ofmat raunkostnaðinn um 50 % og
+  // brenndi inneign 1,5× hraðar en álagið (verðþrepið) segir til um.
+  "claude-sonnet-5": [2, 10],
   "claude-opus-4-8": [5, 25],
   "claude-opus-4-7": [5, 25],
   "claude-opus-4-6": [5, 25],
@@ -57,6 +60,52 @@ export function usdIskRate(): number {
 export function creditMarkup(): number {
   const v = Number(process.env.EVA_CREDIT_MARKUP);
   return Number.isFinite(v) && v > 0 ? v : 2;
+}
+
+/**
+ * Cache-tokens (áskriftarkerfi 2b-3, 17.10.2026). Opinber verðskrá Anthropic:
+ * skrif í cache kosta 1,25× inntaksverð (5 mín. líftími, sem spjallið notar),
+ * lestur 0,1× — nema Opus 5.5 (0,05×) og Fable 5.1 (0,025×). Fram að 2b-3
+ * verðlagði proxyinn cache-tokens alls ekki (vanmat) en platformurinn á
+ * FULLU inntaksverði (ofmat lestrar ×10). Sama regla á báðum stöðum frá nú.
+ */
+export const CACHE_WRITE_MULTIPLIER = 1.25;
+const CACHE_READ_MULTIPLIER: Record<string, number> = {
+  "claude-opus-5-5": 0.05,
+  "claude-fable-5-1": 0.025,
+};
+export function cacheReadMultiplier(model: string | null | undefined): number {
+  return model && model in CACHE_READ_MULTIPLIER ? CACHE_READ_MULTIPLIER[model] : 0.1;
+}
+
+/**
+ * Raunkostnaður kalls í $ með cache-tokens. `inputTokens` er FERSKT inntak
+ * (Anthropic telur cache-tokens sér, ekki í input_tokens).
+ */
+export function costUsdWithCache(
+  model: string | null | undefined,
+  inputTokens: number,
+  outputTokens: number,
+  cacheReadTokens = 0,
+  cacheWriteTokens = 0,
+): number {
+  const [inP] = priceOf(model);
+  return (
+    costUsd(model, inputTokens, outputTokens) +
+    (cacheWriteTokens / 1_000_000) * inP * CACHE_WRITE_MULTIPLIER +
+    (cacheReadTokens / 1_000_000) * inP * cacheReadMultiplier(model)
+  );
+}
+
+/** Raunkostnaður kalls í kr (×1), með cache-tokens. */
+export function rawCostIsk(
+  model: string | null | undefined,
+  inputTokens: number,
+  outputTokens: number,
+  cacheReadTokens = 0,
+  cacheWriteTokens = 0,
+): number {
+  return costUsdWithCache(model, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens) * usdIskRate();
 }
 
 /** What a request costs the user's credit, in ISK. */
