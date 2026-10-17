@@ -20,6 +20,8 @@ import { randomUUID } from "node:crypto";
 import { chargeCredit, recordUsage, cachePlatformBalance } from "../db.js";
 import {
   cachedPlatformPricing,
+  platformPricingRules,
+  resolveMultiplier,
   platformTaskFinish,
   platformTaskRecord,
   platformTaskStart,
@@ -289,16 +291,23 @@ chatRoute.post("/", async (c) => {
                   cacheReadTokens,
                   cacheCreateTokens,
                 );
-                // Eigið álag fyrirtækisins (sérkjör, 2c-4) gengur fyrir þrepinu.
+                // Álag: sérkjör → verðskrá eftir tegund verks (v2) → þrep.
                 const pricing = cachedPlatformPricing(platformUid);
-                const tier = pricing?.tier ?? user.tier;
-                const multiplier = pricing?.multiplierOverride ?? spendMultiplier(tier);
+                const { multiplier, source: multiplierSource } = resolveMultiplier(
+                  pricing,
+                  await platformPricingRules(),
+                  usageSource === "extension" ? "extension_task" : "chat",
+                  user.tier,
+                  spendMultiplier,
+                );
                 const charge = raw * multiplier;
                 const ctx = {
                   action: usageSource === "extension" ? "extension" : "chat",
                   feature: usageSource === "extension" ? "extension" : "chat",
                   user_id: platformUid,
                   cost_isk_raw: raw,
+                  multiplier,
+                  multiplier_source: multiplierSource,
                   ...(taskId ? { task_id: taskId } : {}),
                 };
                 const res = await spendPlatformCreditsV2(platformTenant, charge, chargeKey, ctx);

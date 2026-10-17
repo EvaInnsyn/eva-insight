@@ -146,6 +146,70 @@ export interface PlatformPricing {
   tier: string | null;
   multiplierOverride: number | null;
 }
+
+// ─── Verðskráin (áskriftarkerfi 2d-1) ────────────────────────────────────────
+// Með EVA_BILLING_V2=on (sama rofi og á platforminum, settur á Railway) ræður
+// verðskráin álaginu: task_rules[kind].multiplier, annars default_multiplier.
+// Slökkt → verðþrepið eins og áður. Lesin úr current_billing_settings (sýn,
+// service_role les), í minni í 60 s; bregðist lesturinn gildir þrepið.
+export function billingV2Enabled(): boolean {
+  return process.env.EVA_BILLING_V2 === "on";
+}
+
+export interface PricingRules {
+  defaultMultiplier: number;
+  taskRules: Record<string, { multiplier?: number }>;
+}
+let rulesCache: { at: number; value: PricingRules } | null = null;
+
+export async function platformPricingRules(): Promise<PricingRules | null> {
+  if (!billingV2Enabled()) return null;
+  if (rulesCache && Date.now() - rulesCache.at < 60_000) return rulesCache.value;
+  const c = creds();
+  if (!c) return null;
+  try {
+    const res = await fetch(`${c.url}/rest/v1/current_billing_settings?select=settings`, {
+      headers: { apikey: c.key, Authorization: `Bearer ${c.key}` },
+    });
+    if (!res.ok) return rulesCache?.value ?? null;
+    const rows = (await res.json()) as {
+      settings?: { default_multiplier?: number; task_rules?: Record<string, { multiplier?: number }> };
+    }[];
+    const s = rows[0]?.settings;
+    const dm = Number(s?.default_multiplier);
+    if (!Number.isFinite(dm) || dm < 1) return rulesCache?.value ?? null;
+    const value: PricingRules = { defaultMultiplier: dm, taskRules: s?.task_rules ?? {} };
+    rulesCache = { at: Date.now(), value };
+    return value;
+  } catch {
+    return rulesCache?.value ?? null;
+  }
+}
+
+/** Fyrir próf. */
+export function resetPricingRulesCache(): void {
+  rulesCache = null;
+}
+
+/**
+ * Álagið sem gildir um kall fyrirtækis (sama röð og lib/billing/multiplier.ts
+ * á platforminum): sérkjör → verðskrá eftir tegund verks → þrep.
+ */
+export function resolveMultiplier(
+  pricing: PlatformPricing | undefined,
+  rules: PricingRules | null,
+  kind: "chat" | "extension_task",
+  fallbackTier: string,
+  tierMultiplier: (tier: string) => number,
+): { multiplier: number; source: "override" | "task_rule" | "default" | "tier" } {
+  if (pricing?.multiplierOverride != null) return { multiplier: pricing.multiplierOverride, source: "override" };
+  if (rules) {
+    const rule = rules.taskRules[kind]?.multiplier;
+    if (rule !== undefined && rule >= 1) return { multiplier: rule, source: "task_rule" };
+    return { multiplier: rules.defaultMultiplier, source: "default" };
+  }
+  return { multiplier: tierMultiplier(pricing?.tier ?? fallbackTier), source: "tier" };
+}
 const pricingCache = new Map<string, PlatformPricing>();
 export function cachedPlatformPricing(supabaseUserId: string): PlatformPricing | undefined {
   return pricingCache.get(supabaseUserId);
