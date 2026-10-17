@@ -19,8 +19,15 @@ const { initDb } = await import("./db.js");
 initDb(join(mkdtempSync(join(tmpdir(), "eva-prof-")), "eva.db"));
 
 const { rawCostIsk } = await import("./pricing.js");
-const { platformCreditFor, resolveTenantId, spendPlatformCreditsV2, cachedPlatformPricing } =
-  await import("./supabase.js");
+const {
+  platformCreditFor,
+  resolveTenantId,
+  spendPlatformCreditsV2,
+  cachedPlatformPricing,
+  platformPricingRules,
+  resetPricingRulesCache,
+  resolveMultiplier,
+} = await import("./supabase.js");
 const { enqueueCharge, pendingIskFor, queueAtCap, drainQueue } = await import("./platformQueue.js");
 
 // ─── Falsað fetch ────────────────────────────────────────────────────────────
@@ -154,4 +161,45 @@ test("biðröð: platforminn niðri → röðin bíður; kominn upp → greitt e
   assert.equal(spend.length, 1, "sama auðkenni, eitt kall");
   const rec = calls.find((x) => x.url.includes("task_record_call"));
   assert.deepEqual(rec?.body, { p_task: "verk-1", p_raw: 5, p_charged: 10, p_failed: false });
+});
+
+// ─── Verðskráin (2d-1) ───────────────────────────────────────────────────────
+test("verðskrá: rofi slökktur → engar reglur, þrepið ræður", async () => {
+  delete process.env.EVA_BILLING_V2;
+  resetPricingRulesCache();
+  assert.equal(await platformPricingRules(), null);
+  assert.deepEqual(
+    resolveMultiplier({ tier: "vinir", multiplierOverride: null }, null, "chat", "almennt", (t) => (t === "vinir" ? 1.25 : 2)),
+    { multiplier: 1.25, source: "tier" },
+  );
+});
+
+test("verðskrá: rofi á → task_rules eftir tegund, annars default; sérkjör ganga fyrir öllu", async () => {
+  process.env.EVA_BILLING_V2 = "on";
+  resetPricingRulesCache();
+  handler = (url) =>
+    url.includes("current_billing_settings")
+      ? json([{ settings: { default_multiplier: 2, task_rules: { chat: { multiplier: 1.5 } } } }])
+      : json([]);
+  const rules = await platformPricingRules();
+  assert.deepEqual(rules, { defaultMultiplier: 2, taskRules: { chat: { multiplier: 1.5 } } });
+  const tier = () => 99; // má aldrei vera notað þegar reglur eru til
+  assert.deepEqual(resolveMultiplier({ tier: "almennt", multiplierOverride: null }, rules, "chat", "almennt", tier), { multiplier: 1.5, source: "task_rule" });
+  assert.deepEqual(resolveMultiplier({ tier: "almennt", multiplierOverride: null }, rules, "extension_task", "almennt", tier), { multiplier: 2, source: "default" });
+  assert.deepEqual(resolveMultiplier({ tier: "almennt", multiplierOverride: 1.1 }, rules, "chat", "almennt", tier), { multiplier: 1.1, source: "override" });
+  // Skyndiminni: annað kall sækir ekki aftur
+  calls.length = 0;
+  await platformPricingRules();
+  assert.equal(calls.filter((c) => c.url.includes("current_billing_settings")).length, 0);
+  delete process.env.EVA_BILLING_V2;
+});
+
+test("verðskrá: rofi á en grunnurinn svarar ekki → null (þrepið ræður), ekkert hrun", async () => {
+  process.env.EVA_BILLING_V2 = "on";
+  resetPricingRulesCache();
+  handler = () => {
+    throw new Error("niðri");
+  };
+  assert.equal(await platformPricingRules(), null);
+  delete process.env.EVA_BILLING_V2;
 });
