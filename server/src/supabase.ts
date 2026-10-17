@@ -124,6 +124,11 @@ export interface PlatformCredit {
   balanceIsk: number;
   /** Verðþrep fyrirtækisins á platforminum (organisations.credit_tier). */
   tier: string | null;
+  /**
+   * Eigið álag fyrirtækisins (organisation_billing_terms.multiplier_override,
+   * áskriftarkerfi 2c-4) — gengur fyrir þrepinu. null = þrepið ræður.
+   */
+  multiplierOverride: number | null;
 }
 
 /**
@@ -134,12 +139,16 @@ export interface PlatformCredit {
  * platforminum (gamlir tok_-notendur og prufu-notendur) — þá gildir
  * SQLite-staðan áfram.
  */
-// Verðþrep platformsins per notanda, sett í hvert sinn sem staðan er sótt
-// (auth-hliðið gerir það á hverju kalli). Gjaldfærslan notar það svo sami
-// viðskiptavinur brenni á SAMA hraða hér og á platforminum.
-const tierCache = new Map<string, string | null>();
-export function cachedPlatformTier(supabaseUserId: string): string | null | undefined {
-  return tierCache.get(supabaseUserId);
+// Verðlagning platformsins per notanda (þrep + eigið álag), sett í hvert sinn
+// sem staðan er sótt (auth-hliðið gerir það á hverju kalli). Gjaldfærslan
+// notar það svo sami viðskiptavinur brenni á SAMA hraða hér og á platforminum.
+export interface PlatformPricing {
+  tier: string | null;
+  multiplierOverride: number | null;
+}
+const pricingCache = new Map<string, PlatformPricing>();
+export function cachedPlatformPricing(supabaseUserId: string): PlatformPricing | undefined {
+  return pricingCache.get(supabaseUserId);
 }
 
 export async function platformCreditFor(
@@ -179,6 +188,21 @@ export async function platformCreditFor(
       included = payer[0]?.credits_remaining ?? 0;
     }
 
+    // Sérkjör (2c-4): eigið álag FYRIRTÆKISINS sem vinnur verkið — sama regla
+    // og lib/billing/multiplier.ts á platforminum. Bregðist lesturinn gildir
+    // þrepið; aldrei undir ×1.
+    let multiplierOverride: number | null = null;
+    const termsRes = await fetch(
+      `${c.url}/rest/v1/organisation_billing_terms?organisation_id=eq.${tenantId}&select=multiplier_override`,
+      { headers },
+    );
+    if (termsRes.ok) {
+      const terms = (await termsRes.json()) as { multiplier_override: number | string | null }[];
+      const v = terms[0]?.multiplier_override;
+      const n = v === null || v === undefined ? null : Number(v);
+      if (n !== null && Number.isFinite(n) && n >= 1) multiplierOverride = n;
+    }
+
     const nowIso = new Date().toISOString();
     const lotsRes = await fetch(
       `${c.url}/rest/v1/credit_purchase_logs?tenant_id=eq.${payerId}&expired=is.false&expires_at=gt.${nowIso}&balance_remaining=gt.0&select=balance_remaining`,
@@ -187,12 +211,13 @@ export async function platformCreditFor(
     if (!lotsRes.ok) return null;
     const lots = (await lotsRes.json()) as { balance_remaining: number }[];
     const purchased = lots.reduce((sum, l) => sum + Number(l.balance_remaining), 0);
-    tierCache.set(supabaseUserId, org[0].credit_tier ?? null);
+    const pricing: PlatformPricing = { tier: org[0].credit_tier ?? null, multiplierOverride };
+    pricingCache.set(supabaseUserId, pricing);
     return {
       tenantId,
       payerId,
       balanceIsk: Number(included) + purchased,
-      tier: org[0].credit_tier ?? null,
+      ...pricing,
     };
   } catch {
     return null;

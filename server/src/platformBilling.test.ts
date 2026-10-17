@@ -19,7 +19,7 @@ const { initDb } = await import("./db.js");
 initDb(join(mkdtempSync(join(tmpdir(), "eva-prof-")), "eva.db"));
 
 const { rawCostIsk } = await import("./pricing.js");
-const { platformCreditFor, resolveTenantId, spendPlatformCreditsV2, cachedPlatformTier } =
+const { platformCreditFor, resolveTenantId, spendPlatformCreditsV2, cachedPlatformPricing } =
   await import("./supabase.js");
 const { enqueueCharge, pendingIskFor, queueAtCap, drainQueue } = await import("./platformQueue.js");
 
@@ -65,11 +65,31 @@ test("Deila inneign: staðan er MÓÐURINNAR, og þrepið fyrirtækisins geymt",
     return json([]);
   };
   const c = await platformCreditFor("uid-deila");
-  assert.deepEqual(c, { tenantId: "barn", payerId: "modir", balanceIsk: 1000, tier: "vinir" });
-  assert.equal(cachedPlatformTier("uid-deila"), "vinir");
+  assert.deepEqual(c, { tenantId: "barn", payerId: "modir", balanceIsk: 1000, tier: "vinir", multiplierOverride: null });
+  assert.deepEqual(cachedPlatformPricing("uid-deila"), { tier: "vinir", multiplierOverride: null });
   // Lotur sóttar fyrir GREIÐANDANN, ekki barnið:
   assert.ok(calls.some((x) => x.url.includes("credit_purchase_logs?tenant_id=eq.modir")));
   assert.ok(!calls.some((x) => x.url.includes("credit_purchase_logs?tenant_id=eq.barn")));
+});
+
+test("sérkjör (2c-4): eigið álag lesið af fyrirtækinu sjálfu og sett í skyndiminni; undir ×1 hunsað", async () => {
+  let override: number | string | null = 1.25;
+  handler = (url) => {
+    if (url.includes("/users?")) return json([{ organisation_id: "org-alag" }]);
+    if (url.includes("organisations?id=eq.org-alag"))
+      return json([{ credits_remaining: 500, billing_org_id: null, credit_tier: "almennt" }]);
+    if (url.includes("organisation_billing_terms?organisation_id=eq.org-alag"))
+      return json([{ multiplier_override: override }]);
+    return json([]);
+  };
+  const c = await platformCreditFor("uid-alag");
+  assert.equal(c?.multiplierOverride, 1.25);
+  assert.deepEqual(cachedPlatformPricing("uid-alag"), { tier: "almennt", multiplierOverride: 1.25 });
+
+  override = "0.5"; // PostgREST skilar numeric sem streng
+  assert.equal((await platformCreditFor("uid-alag"))?.multiplierOverride, null);
+  override = null;
+  assert.equal((await platformCreditFor("uid-alag"))?.multiplierOverride, null);
 });
 
 test("fyrirtækjaminnið rennur út — skipti um fyrirtæki ná í gegn", async (t) => {
