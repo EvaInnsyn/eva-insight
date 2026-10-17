@@ -19,7 +19,7 @@ import { authenticate, authErrorResponse } from "../auth.js";
 import { randomUUID } from "node:crypto";
 import { chargeCredit, recordUsage, cachePlatformBalance } from "../db.js";
 import {
-  cachedPlatformTier,
+  cachedPlatformPricing,
   platformTaskFinish,
   platformTaskRecord,
   platformTaskStart,
@@ -289,8 +289,11 @@ chatRoute.post("/", async (c) => {
                   cacheReadTokens,
                   cacheCreateTokens,
                 );
-                const tier = cachedPlatformTier(platformUid) ?? user.tier;
-                const charge = raw * spendMultiplier(tier);
+                // Eigið álag fyrirtækisins (sérkjör, 2c-4) gengur fyrir þrepinu.
+                const pricing = cachedPlatformPricing(platformUid);
+                const tier = pricing?.tier ?? user.tier;
+                const multiplier = pricing?.multiplierOverride ?? spendMultiplier(tier);
+                const charge = raw * multiplier;
                 const ctx = {
                   action: usageSource === "extension" ? "extension" : "chat",
                   feature: usageSource === "extension" ? "extension" : "chat",
